@@ -38,7 +38,7 @@ The hosted HTTP path (`api/index.ts` + `src/http.ts`) reads these, all optional 
 
 - `RUNPOD_GRAPHQL_URL`: flash auth backend for the OAuth flow (default `https://api.runpod.io/graphql`). Also the host the hosted credential pre-flight verifies against, so unlike the guest flash-auth mutations it now receives the caller's bearer token — point it only at a host you trust with that.
 - `CONSOLE_BASE_URL`: console that hosts the sign-in handoff page (default `https://console.runpod.io`).
-- `RUNPOD_REST_API_URL` / `RUNPOD_SERVERLESS_API_URL`: override the REST and Serverless API hosts (e.g. for a dev API key).
+- `RUNPOD_API_BASE_URL` / `RUNPOD_SERVERLESS_API_URL`: override the REST and Serverless API hosts (e.g. for a dev API key).
 - `RUNPOD_PUBLIC_GRAPHQL_URL`: override the public discovery GraphQL host used by `list-gpu-types`, `list-data-centers`, `get-capacity`, `list-hub-repos`, and `list-public-endpoints` (default `https://api.runpod.io/graphql`). Never carries a credential — safe to point at a stub, though note `get-capacity` has no REST fallback on either API version.
 - `RUNPOD_AUTHED_GRAPHQL_URL`: override the GraphQL host for **authenticated** operations with no REST equivalent — `deploy-hub-repo` and `set-endpoint-gpus` (default `https://api.runpod.io/graphql`). These send the caller's API key as a Bearer token, so only point this at a host you trust with it; on the hosted server that key is a per-user OAuth-minted one.
 - `RUNPOD_API_KEY_NAME`: name for the minted key (default `runpod-mcp`; set to `""` to omit for a backend without the `apiKeyName` argument).
@@ -48,7 +48,7 @@ The hosted HTTP path (`api/index.ts` + `src/http.ts`) reads these, all optional 
 - `ALP_SINK_URL` / `ALP_SINK_SECRET`: enable the ALP write tools (`report_feedback`, `save_to_journal`, `ask_question`) on the hosted path and point `POST /api/alp/submit` at the private storage sink, authenticated with the shared secret. Unset = the tools are absent and the endpoint answers `recorded: false` honestly. ALP is hosted-only: local stdio never registers these tools. The sink itself lives in `convex/` in this repo (deployed separately via `CONVEX_DEPLOY_KEY`; see `convex/README.md`).
 - `MCP_SKIP_CREDENTIAL_CHECK`: set to the exact string `true` to disable the hosted pre-flight credential verification (dead bearers then surface as tool-level 401 errors instead of an HTTP 401 re-auth signal). Use this if the pre-flight itself is ever causing outages. Note the pre-flight ALSO self-disables when a REST/Serverless host is overridden without a matching `RUNPOD_GRAPHQL_URL`, since it would otherwise validate the key against the wrong environment and reject every request.
 
-The build produces `dist/stdio.*`, `dist/http.*`, and `dist/tools.*`. Because `package.json` has `"type": "module"`, always use `dist/stdio.mjs` when running the built local server with `node`.
+The build produces `dist/stdio.*` and `dist/http.*`. Because `package.json` has `"type": "module"`, always use `dist/stdio.mjs` when running the built local server with `node`.
 
 ## Local development
 
@@ -75,7 +75,7 @@ Hand-written tools (`src/specgen/tools/`) exist only where generation cannot rea
 
 ## Known issues
 
-DELETE endpoints in the Runpod REST API return 204 No Content with no body. The `runpodRequest()` helper handles this by checking `content-type` before parsing JSON, but MCP clients may still surface an "Unexpected end of JSON input" message. The operation succeeds regardless.
+DELETE endpoints may return 204 No Content. The SDK handles bodyless responses; generated dispatch reports their HTTP status.
 
 Pod `publicIp` and `portMappings` fields are empty while the container is initializing. This is Runpod API behavior, not an MCP server bug. Pods need to be polled until they are fully running.
 

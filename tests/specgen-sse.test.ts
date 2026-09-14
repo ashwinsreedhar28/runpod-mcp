@@ -120,3 +120,22 @@ test('snapshot byte cap bounds a single oversized network chunk', async () => {
   assert.equal(result.truncated, true);
   assert.equal(cancelled, true);
 });
+
+test('SSE deadline returns collected frames even when the source ignores abort', async () => {
+  const source = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(frame('ready')));
+    },
+  });
+  const reader = createSseReader({
+    apiKey: 'test-key',
+    fetchImpl: async () => new Response(source),
+  });
+  const result = await collectLogSnapshot(
+    reader,
+    'https://example.invalid/logs',
+    { maxWaitMs: 20 }
+  );
+  assert.equal(result.items[0]?.line, 'ready');
+  assert.equal(source.locked, false);
+});

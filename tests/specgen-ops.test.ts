@@ -379,3 +379,21 @@ test('the SDK deadline spans all retry attempts, not one attempt each', async ()
     globalThis.fetch = realFetch;
   }
 });
+
+test('boundedFetch interrupts an uncooperative fetch and body', async () => {
+  const { boundedFetch } = await import(
+    '../src/specgen/clients/bounded-fetch.js'
+  );
+  const never = new Promise<Response>(() => {});
+  await assert.rejects(
+    boundedFetch(() => never, 20)('https://example.invalid'),
+    { name: 'TimeoutError' }
+  );
+  const body = new ReadableStream<Uint8Array>();
+  const response = await boundedFetch(
+    async () => new Response(body),
+    20
+  )('https://example.invalid');
+  await assert.rejects(response.text(), { name: 'TimeoutError' });
+  assert.equal(body.locked, false);
+});

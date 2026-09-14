@@ -13,6 +13,7 @@ import {
   type RetryOptions,
   type RunpodClient,
 } from '@runpod/typescript-api-sdk';
+import { sdkBase } from '../_shared/hosts.js';
 import { buildTrackingHeaders } from '../_shared/tracking.js';
 import { createGraphqlClient, type GraphqlClient } from './clients/graphql.js';
 import { missingKeyError } from './clients/http-error.js';
@@ -118,6 +119,7 @@ export function createToolContext(
         if (!apiKey) throw missingKeyError();
         sdk = createRunpodClient({
           apiKey,
+          baseUrl: sdkBase(process.env),
           fetch: fetchImpl,
           timeoutMs: options.sdkTimeoutMs ?? SDK_TIMEOUT_MS,
           retry: options.sdkRetry ?? SDK_RETRY,

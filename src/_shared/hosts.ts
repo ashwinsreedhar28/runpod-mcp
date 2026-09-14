@@ -10,7 +10,7 @@ export type Env = Record<string, string | undefined>;
 // probe URL, the GraphQL/log clients) must resolve identically or the
 // guard's "checker and guard cannot disagree" invariant breaks.
 function pick(value: string | undefined, fallback: string): string {
-  return value || fallback;
+  return value?.trim().replace(/\/+$/, '') || fallback;
 }
 
 export function restV1Base(env: Env): string {

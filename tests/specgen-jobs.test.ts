@@ -41,15 +41,15 @@ test('pollJobStatus bounds each /status call by the remaining budget', async () 
   assert.equal(result.status, 'COMPLETED');
   assert.equal(timeouts.length, 3);
   // Each poll is bounded by what remains of the budget (never above it), and
-  // never below the 2s floor that keeps the last poll answerable.
+  // remains positive so the request always has a finite deadline.
   for (const t of timeouts) {
     assert.ok(t <= 10_000, `poll timeout ${t} exceeds the budget`);
-    assert.ok(t >= 2_000, `poll timeout ${t} below the floor`);
+    assert.ok(t > 0, `poll timeout ${t} must be positive`);
   }
   assert.ok(timeouts[2] <= timeouts[0], 'remaining budget must shrink');
 });
 
-test('pollJobStatus floors a nearly-spent budget instead of a sub-second poll', async () => {
+test('pollJobStatus preserves sub-second caller budgets', async () => {
   const timeouts: number[] = [];
   await pollJobStatus({
     fetchStatus: async (timeoutMs) => {
@@ -59,7 +59,8 @@ test('pollJobStatus floors a nearly-spent budget instead of a sub-second poll', 
     budgetMs: 100,
     pollIntervalMs: 10,
   });
-  for (const t of timeouts) assert.equal(t, 2_000);
+  assert.ok(timeouts.length > 0);
+  for (const t of timeouts) assert.ok(t > 0 && t <= 100);
 });
 
 test('pollJobStatus returns terminal status immediately', async () => {
@@ -93,9 +94,9 @@ test('pollJobStatus wall clock stays near the budget when fetch hangs briefly', 
   assert.ok(elapsed < 1_500, `took ${elapsed}ms for a 200ms budget`);
 });
 
-test('streamPollTimeoutMs never exceeds remaining budget (above its floor)', () => {
+test('streamPollTimeoutMs never extends a positive remaining budget', () => {
   assert.equal(streamPollTimeoutMs(3_000, 10_000), 3_000);
-  assert.equal(streamPollTimeoutMs(500, 10_000), 2_000); // floor
+  assert.equal(streamPollTimeoutMs(500, 10_000), 500);
   assert.equal(streamPollTimeoutMs(60_000, 10_000), 15_000); // hold + slack
 });
 
@@ -245,4 +246,48 @@ test('queued jobs with only throttled workers still direct callers to logs', asy
   assert.match(String(payload.hint), /2 throttled/);
   assert.match(String(payload.hint), /any worker/);
   assert.doesNotMatch(String(payload.hint), /the hosts are at capacity/);
+});
+
+test('status polling does not sleep or start another request beyond its budget', async () => {
+  let calls = 0;
+  const started = Date.now();
+  const result = await pollJobStatus({
+    fetchStatus: async () => {
+      calls++;
+      return { status: 'IN_QUEUE' };
+    },
+    budgetMs: 30,
+    pollIntervalMs: 1000,
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.pollingTimedOut, true);
+  assert.ok(
+    Date.now() - started < 500,
+    'the polling interval must fit inside the budget'
+  );
+});
+
+test('queued-job diagnostics are never shared between caller contexts', async () => {
+  const makeContext = (unhealthy: number) =>
+    ({
+      runtime: async () => ({ status: 'IN_QUEUE' }),
+      sdk: {
+        GET: async () => ({
+          data: { summary: { total: 1, unhealthy }, workers: [] },
+        }),
+      },
+    }) as unknown as Parameters<typeof getJobStatus.handler>[0];
+  const args = { endpointId: 'shared-endpoint-id', jobId: 'job' };
+  const first = await getJobStatus.handler(makeContext(1), args);
+  const second = await getJobStatus.handler(makeContext(0), args);
+  assert.equal(
+    (first.payload as { workerHealth: { unhealthy: number } }).workerHealth
+      .unhealthy,
+    1
+  );
+  assert.equal(
+    (second.payload as { workerHealth: { unhealthy: number } }).workerHealth
+      .unhealthy,
+    0
+  );
 });

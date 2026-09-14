@@ -109,13 +109,13 @@ test('SSE connection timeout is a tool error; established streams still yield sn
   const { runTool } = await import('../src/specgen/tools/util.js');
   const silent = createSseReader({
     apiKey: 'fake',
-    fetchImpl: ((_url, init) =>
+    fetchImpl: ((input, init) =>
       new Promise<Response>((_resolve, reject) => {
-        init!.signal!.addEventListener(
-          'abort',
-          () => reject(init!.signal!.reason),
-          { once: true }
-        );
+        const signal =
+          init?.signal ?? (input instanceof Request ? input.signal : undefined);
+        signal!.addEventListener('abort', () => reject(signal!.reason), {
+          once: true,
+        });
       })) as typeof fetch,
   });
   const failed = await runTool(async () => ({
@@ -131,14 +131,17 @@ test('SSE connection timeout is a tool error; established streams still yield sn
   for (const frame of ['', 'data: {"line":"startup complete"}\n\n']) {
     const reader = createSseReader({
       apiKey: 'fake',
-      fetchImpl: (async (_url, init) =>
+      fetchImpl: (async (input, init) =>
         new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
               if (frame) controller.enqueue(new TextEncoder().encode(frame));
-              init!.signal!.addEventListener(
+              const signal =
+                init?.signal ??
+                (input instanceof Request ? input.signal : undefined);
+              signal!.addEventListener(
                 'abort',
-                () => controller.error(init!.signal!.reason),
+                () => controller.error(signal!.reason),
                 { once: true }
               );
             },
@@ -166,7 +169,7 @@ test('runtime empty host override uses production while a configured override is
   const original = process.env.RUNPOD_SERVERLESS_API_URL;
   const urls: string[] = [];
   const fetchImpl = (async (input: RequestInfo | URL) => {
-    urls.push(new URL(String(input)).href);
+    urls.push(new Request(input).url);
     return new Response('{"status":"COMPLETED"}');
   }) as typeof fetch;
   try {

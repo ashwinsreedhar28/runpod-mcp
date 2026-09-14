@@ -19,26 +19,32 @@ To develop against a non-production API, pair the runtime override with the matc
 
 ## Serverless endpoint types and autoscaling
 
-`create-endpoint` takes an `endpointType`:
+`create-endpoint` takes a `body` object matching the REST v2 schema. Set
+`body.type` explicitly to `QUEUE` or `LOAD_BALANCER`; it has no default. The
+endpoint type cannot be changed after creation.
 
-- **`QUEUE`** (default) — jobs go through the managed queue. `run`, `runsync`, `status`, `stream`, `cancel`, `retry`, `purge-queue` and `health` all apply.
-- **`LOAD_BALANCER`** — HTTP requests go straight to worker-defined paths. There is no queue, so these endpoints scale on `REQUEST_COUNT` only; `QUEUE_DELAY` is rejected.
+Set `body.scaling` to `{ "type": "QUEUE_DELAY", "queueDelay": 4 }` for a queue
+delay target, or `{ "type": "REQUEST_COUNT", "requestCount": 1 }` for a request
+count target. Load-balancing endpoints support request-count scaling only.
+Configure worker bounds and idle time under `body.workers` (`min`, `max`,
+`idleTimeout`). Idle timeout is rejected for queue endpoints using request-count
+scaling. Consult the current tool schema for required fields and numeric limits.
 
-An endpoint's type is fixed at creation — `update-endpoint` cannot change it. Read the URLs to call an endpoint with from `requestUrls` on the `get-endpoint` reply rather than constructing them (`list-endpoints` is trimmed and omits them): a queue endpoint returns the full job-API set, a load-balancing one returns its base and health URLs.
-
-Autoscaling is set with `scalerType` (`QUEUE_DELAY` = seconds a request waits in the queue, min `0.5`; `REQUEST_COUNT` = in-flight requests per worker, integer min `1`), `scalerValue` (default `4`), and `idleTimeout` (seconds, `1`–`3600`). `scalerType` defaults to `QUEUE_DELAY` for queue endpoints and `REQUEST_COUNT` for load-balancing ones. `idleTimeout` does not apply to a queue endpoint scaling on `REQUEST_COUNT`.
-
-> **Requires a host serving the reshaped `/v2/serverless` write schema.** These tools send endpoint `type` on create, a per-scaler `scaling` object (`{type, queueDelay}` / `{type, requestCount}`), and `idleTimeout` under `workers`. A host still on the older flat shape rejects that with a `422` naming `queueDelay`/`requestCount`/`idleTimeout` as not allowed. If you hit that, point `RUNPOD_REST_V2_API_URL` at a host with the new schema, (the v1 legacy model is retired).
+Read `requestUrls` from `get-endpoint` for the runtime URLs; `list-endpoints`
+omits those derived URLs. To use a non-production management API, set
+`RUNPOD_API_BASE_URL` to its base URL **without `/v2`**. The generated paths
+already include that prefix. The legacy `RUNPOD_REST_V2_API_URL` spelling does
+not configure the SDK.
 
 ## Private image pull: credentials vs ECR delegation
 
 Two ways to let Runpod pull a private image, and they are not interchangeable:
 
-- **`create-registry`** — stores a username + password/token. Works for any registry (Docker Hub, GHCR, Quay, self-hosted). Reference the resulting id from `create-pod` / `create-endpoint` via `containerRegistryAuthId`.
+- **`create-registry`** — stores a username + password/token. Works for any registry (Docker Hub, GHCR, Quay, self-hosted). Reference the resulting id from `create-pod` / `create-endpoint` via `body.registry`.
 - **`create-delegation`** — **AWS ECR only, no credentials stored.** You register an ECR repository ARN and Runpod is granted scoped pull access; the reply carries a `dockerRegistryUri`. Manage with `list-delegations`, revoke with `revoke-delegation`.
 
 Prefer the delegation for ECR — nothing long-lived is stored on Runpod's side.
 
 ## Large tool output
 
-Resource **lists** are paginated (default 20 items, `nextCursor`), so a large account can't flood the agent's context. But **Serverless job output** — `run-endpoint`, `runsync-endpoint`, `get-job-status`, and especially `stream-job` — is returned as-is and is **not** size-capped. A very large or long-streaming result can exceed the context window. If output may be huge, have the agent write it to a file, or set `s3Config` on the job so large outputs go to object storage.
+`list-endpoints`, Hub, and public-endpoint listings support bounded pages. Other generated REST lists and `list-templates` return the complete upstream list; they can still be large. But **Serverless job output** — `run-endpoint`, `runsync-endpoint`, `get-job-status`, and especially `stream-job` — is returned as-is and is **not** size-capped. A very large or long-streaming result can exceed the context window. If output may be huge, have the agent write it to a file, or set `s3Config` on the job so large outputs go to object storage.

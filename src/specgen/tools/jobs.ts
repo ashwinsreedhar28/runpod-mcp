@@ -32,7 +32,7 @@ export const STREAM_BUDGET_MS = HOSTED
   ? HTTP_LONG_POLL_BUDGET_MS
   : 5 * 60 * 1000;
 const STREAM_UPSTREAM_DEFAULT_WAIT_MS = 10_000;
-const MIN_STREAM_POLL_TIMEOUT_MS = 2_000;
+const MIN_POLL_TIMEOUT_MS = 1;
 const STREAM_JOB_POLL_INTERVAL_MS = 1_000;
 export const MAX_CONSECUTIVE_STREAM_ERRORS = 5;
 
@@ -68,17 +68,15 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-// Deadline for ONE /stream poll: the hold it brackets plus slack, bounded by
-// what is left of the budget, never below the floor (so the last poll of a
-// nearly-spent budget can still answer) — and never the whole budget (one
-// wedged socket must not eat the run before the error cap can engage).
+// A poll can use only the time remaining in the caller's budget. The
+// upstream hold gets slack when available, never an extension of that budget.
 export function streamPollTimeoutMs(
   remainingMs: number,
   holdMs: number
 ): number {
   return Math.max(
     Math.min(remainingMs, holdMs + UPSTREAM_HOLD_SLACK_MS),
-    MIN_STREAM_POLL_TIMEOUT_MS
+    MIN_POLL_TIMEOUT_MS
   );
 }
 
@@ -108,7 +106,7 @@ async function pollUntilTerminal(deps: {
   let lastError: string | undefined;
   let lastErrorStatus = 502;
 
-  while (true) {
+  while (elapsed() < deps.budgetMs) {
     try {
       const reply = await deps.poll(deps.timeoutFor(deps.budgetMs - elapsed()));
       consecutiveErrors = 0;
@@ -146,27 +144,21 @@ async function pollUntilTerminal(deps: {
       }
     }
 
-    if (elapsed() > deps.budgetMs) {
-      if (lastError !== undefined) {
-        throw new HttpError(
-          `Polling budget expired after an upstream error: ${lastError}`,
-          lastErrorStatus,
-          {
-            ...result,
-            note: 'The latest job status could not be retrieved. Retry after addressing the upstream error.',
-          }
-        );
-      }
-      return {
-        ...result,
-        pollingTimedOut: true,
-        note: deps.timedOutNote,
-        ...(lastError ? { lastError } : {}),
-      };
-    }
-
-    await sleep(deps.pollIntervalMs);
+    const remainingMs = Math.max(0, deps.budgetMs - elapsed());
+    await sleep(Math.min(deps.pollIntervalMs, remainingMs));
   }
+
+  if (lastError !== undefined) {
+    throw new HttpError(
+      `Polling budget expired after an upstream error: ${lastError}`,
+      lastErrorStatus,
+      {
+        ...result,
+        note: 'The latest job status could not be retrieved. Retry after addressing the upstream error.',
+      }
+    );
+  }
+  return { ...result, pollingTimedOut: true, note: deps.timedOutNote };
 }
 
 // Exported so a test can drive the loop through `poll` without a server.
@@ -219,11 +211,8 @@ export async function pollJobStatus(deps: {
     budgetMs: deps.budgetMs,
     // One /status call may not outlive the budget: unbounded, a hung socket
     // holds the request past the hosted 60s reaper (the client default is
-    // 30s, which a poll started at 44s of a 45s budget would exceed) — but
-    // never below the floor, so the last poll of a nearly-spent budget can
-    // still answer.
-    timeoutFor: (remainingMs) =>
-      Math.max(remainingMs, MIN_STREAM_POLL_TIMEOUT_MS),
+    // 30s, which a poll started at 44s of a 45s budget would exceed).
+    timeoutFor: (remainingMs) => Math.max(remainingMs, MIN_POLL_TIMEOUT_MS),
     pollIntervalMs: deps.pollIntervalMs ?? STATUS_POLL_INTERVAL_MS,
     abortedNote:
       'Polling stopped after repeated errors with the job possibly still running. Call get-job-status again to keep checking.',
@@ -263,12 +252,20 @@ interface CachedDiagnosis {
   value: { workerHealth: WorkerSummary; hint: string };
   expiresAt: number;
 }
-const diagnosisCache = new Map<string, CachedDiagnosis>();
+// A context belongs to one caller. Never reuse private worker diagnostics
+// across callers that happen to ask about the same endpoint ID.
+const diagnosisCaches = new WeakMap<
+  ToolContext,
+  Map<string, CachedDiagnosis>
+>();
 
 async function diagnoseQueuedJob(
   ctx: ToolContext,
   endpointId: string
 ): Promise<{ workerHealth: WorkerSummary; hint: string } | null> {
+  const diagnosisCache =
+    diagnosisCaches.get(ctx) ?? new Map<string, CachedDiagnosis>();
+  diagnosisCaches.set(ctx, diagnosisCache);
   const cached = diagnosisCache.get(endpointId);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
   diagnosisCache.delete(endpointId);

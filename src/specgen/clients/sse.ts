@@ -10,6 +10,7 @@ export type { LogEntry } from '@runpod/typescript-api-sdk';
 
 import { withRateLimitHint } from '../../_shared/rate-limit.js';
 import { HttpError, missingKeyError } from './http-error.js';
+import { boundedFetch } from './bounded-fetch.js';
 
 export const LOG_STREAM_DEFAULT_WAIT_MS = 5_000;
 export const LOG_STREAM_MAX_BYTES = 256 * 1024;
@@ -32,20 +33,17 @@ export function createSseReader(
 
   return async (url, opts) => {
     if (!apiKey) throw missingKeyError();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), opts.maxWaitMs);
     const chunks: Uint8Array[] = [];
     let bytes = 0;
     let truncated = false;
     let streamEstablished = false;
     try {
-      const response = await fetchImpl(url, {
+      const response = await boundedFetch(fetchImpl, opts.maxWaitMs)(url, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${apiKey}`,
           Accept: 'text/event-stream',
         },
-        signal: controller.signal,
       });
       if (!response.ok) {
         const body = await response.text().catch(() => '');
@@ -65,27 +63,23 @@ export function createSseReader(
           bytes += boundedChunk.length;
           if (bytes >= opts.maxBytes) {
             truncated = true;
-            controller.abort();
             break;
           }
         }
       }
     } catch (err) {
-      // Only our own abort on an established stream ends a snapshot normally.
+      // The request deadline ends an established stream normally.
       // Before headers, there is no successful log read to return; runTool
       // maps the timeout to a retryable 504 instead of an empty success.
       if (
         !(
           streamEstablished &&
-          controller.signal.aborted &&
           err instanceof Error &&
-          (err.name === 'AbortError' || err.name === 'TimeoutError')
+          err.name === 'TimeoutError'
         )
       ) {
         throw err;
       }
-    } finally {
-      clearTimeout(timer);
     }
     return { raw: Buffer.concat(chunks).toString('utf8'), truncated };
   };
