@@ -23,6 +23,7 @@
     "api/**/*",
     "scripts/**/*",
     "tests/**/*",
+    "specgen/generator/**/*",
     "convex/**/*"
   ],
   "exclude": ["dist", "build", "node_modules"]
