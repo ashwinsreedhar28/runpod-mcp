@@ -12,6 +12,7 @@ export default defineConfig([
     format: ['cjs', 'esm'],
     dts: true,
     sourcemap: true,
+    noExternal: ['@runpod/typescript-api-sdk'],
     banner: {
       js: '#!/usr/bin/env node',
     },
@@ -30,6 +31,7 @@ export default defineConfig([
     format: ['cjs', 'esm'],
     dts: true,
     sourcemap: true,
+    noExternal: ['@runpod/typescript-api-sdk'],
     define: {
       __PACKAGE_VERSION__: JSON.stringify(version),
     },
