@@ -2,7 +2,7 @@
 // path params substitute into the URL template, query params pass through, and
 // the optional "body" argument becomes the request body.
 
-import type { RunpodClient } from '@runpod/sdk';
+import type { RunpodClient } from '@runpod/typescript-api-sdk';
 import type { GeneratedTool } from './generated/tools.gen.js';
 import { withRateLimitHint } from '../_shared/rate-limit.js';
 

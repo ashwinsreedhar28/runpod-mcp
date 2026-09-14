@@ -42,7 +42,7 @@ In **Claude Code**, the native plugin route also wires up the hosted MCP server 
 
 ### Requirements
 
-- Node.js 18 or higher.
+- Node.js 20 or higher.
 - A Runpod account and [API key](https://www.runpod.io/console/user/settings).
 
 ## Connect to the hosted server

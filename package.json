@@ -12,7 +12,8 @@
   },
   "files": [
     "dist/**/*",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "THIRD_PARTY_NOTICES.txt"
   ],
   "scripts": {
     "build": "pnpm clean && tsup --tsconfig tsconfig.build.json",
@@ -70,11 +71,11 @@
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "yaml": "^2.9.0",
-    "@runpod/sdk": "file:vendor/runpod-sdk",
-    "convex": "^1.16.0"
+    "convex": "^1.16.0",
+    "@runpod/typescript-api-sdk": "^0.1.0"
   },
   "engines": {
-    "node": ">=18",
+    "node": ">=20",
     "pnpm": ">=10"
   },
   "publishConfig": {

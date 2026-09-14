@@ -9,14 +9,12 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  createRetryFetch,
   createRunpodClient,
   type RetryOptions,
   type RunpodClient,
-} from '@runpod/sdk';
+} from '@runpod/typescript-api-sdk';
 import { buildTrackingHeaders } from '../_shared/tracking.js';
 import { createGraphqlClient, type GraphqlClient } from './clients/graphql.js';
-import { boundedFetch } from './clients/bounded-fetch.js';
 import { missingKeyError } from './clients/http-error.js';
 import { createRuntimeClient, type RuntimeClient } from './clients/runtime.js';
 import { createSseReader, type SseReader } from './clients/sse.js';
@@ -105,24 +103,6 @@ export function createToolContext(
     };
   }
 
-  // SDK-only fetch: retries INSIDE one deadline. The SDK would normally wrap
-  // our fetch in its retry layer, so every attempt got a fresh timer and three
-  // slow 503s ran ~77s against a 60s reap (measured 2.58x the per-attempt
-  // budget). Composing it ourselves puts the retry layer under the deadline:
-  // one timer, armed once, covering all attempts and the sleeps between them.
-  // openapi-fetch never sets a signal of its own, so this timeout is
-  // authoritative. An abort that lands during a backoff sleep is noticed at
-  // the next attempt, so overrun is bounded by one sleep (maxBackoffMs).
-  const retry = options.sdkRetry ?? SDK_RETRY;
-  const retryingFetch =
-    retry === false
-      ? fetchImpl
-      : createRetryFetch({ fetch: fetchImpl, ...retry });
-  const sdkFetch = boundedFetch(
-    retryingFetch,
-    options.sdkTimeoutMs ?? SDK_TIMEOUT_MS
-  );
-
   let sdk: RunpodClient | undefined;
 
   return {
@@ -138,9 +118,9 @@ export function createToolContext(
         if (!apiKey) throw missingKeyError();
         sdk = createRunpodClient({
           apiKey,
-          fetch: sdkFetch,
-          // Already applied inside sdkFetch, under the deadline (see above).
-          retry: false,
+          fetch: fetchImpl,
+          timeoutMs: options.sdkTimeoutMs ?? SDK_TIMEOUT_MS,
+          retry: options.sdkRetry ?? SDK_RETRY,
         });
       }
       return sdk;

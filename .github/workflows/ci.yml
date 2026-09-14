@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        node-version: [18, 20, 22]
+        node-version: [20, 22, 24]
         # The install wizard has Windows-specific Claude Code detection and npm
         # package-launch paths. The suite models the published native-bin package in
         # a space-containing global prefix and proves its .cmd shim is bypassed.

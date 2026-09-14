@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   collectLogSnapshot,
+  createSseReader,
   type SseReader,
 } from '../src/specgen/clients/sse.js';
 
@@ -82,4 +83,40 @@ test('partial heartbeat or metadata does not discard a preceding complete log', 
       }
     }
   }
+});
+
+test('SDK parser handles CR-only frames and preserves invalid log data as raw', async () => {
+  const result = await collectLogSnapshot(
+    readerOf('data: {"line":"hé😀"}\r\rdata: {"line":42}\r\r', false),
+    'https://example.invalid/logs',
+    {}
+  );
+  assert.deepEqual(result.items, [{ line: 'hé😀' }, { raw: '{"line":42}' }]);
+});
+
+test('snapshot byte cap bounds a single oversized network chunk', async () => {
+  let cancelled = false;
+  const reader = createSseReader({
+    apiKey: 'test-key',
+    fetchImpl: async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(frame('ok') + 'x'.repeat(2_000_000))
+            );
+          },
+          cancel() {
+            cancelled = true;
+          },
+        })
+      ),
+  });
+  const result = await reader('https://example.invalid/logs', {
+    maxWaitMs: 1000,
+    maxBytes: 100,
+  });
+  assert.equal(Buffer.byteLength(result.raw), 100);
+  assert.equal(result.truncated, true);
+  assert.equal(cancelled, true);
 });

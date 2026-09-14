@@ -148,7 +148,7 @@ test('dispatch 400s a missing required argument instead of calling the API', asy
 // client against a stub fetch tests the wire format that actually 400'd, and
 // getAll() proves there is exactly ONE param rather than two.
 test('non-exploded array query params are comma-joined, not repeated', async () => {
-  const { createRunpodClient } = await import('@runpod/sdk');
+  const { createRunpodClient } = await import('@runpod/typescript-api-sdk');
   const { generatedTools } = await import(
     '../src/specgen/generated/tools.gen.js'
   );

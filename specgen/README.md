@@ -22,8 +22,17 @@ src/specgen/generated/          machine-written output — never hand-edited
 src/specgen/tools/              curated overlay (runtime plane, GraphQL, SSE,
                                 trimmed list views)
 src/specgen/ops.ts              tool-call logging + the rate-limit stub seam
-vendor/runpod-sdk/              locally built @runpod/sdk (npm publish pending)
 ```
+
+## REST client dependency
+
+The management API client comes from
+[`@runpod/typescript-api-sdk`](https://www.npmjs.com/package/@runpod/typescript-api-sdk),
+installed from npm and bundled into both MCP entrypoints. Node.js 20+ is required.
+Each tool context creates its own client with the caller's API key and tracking
+headers. The SDK owns retries, the whole-request deadline, and SSE event parsing;
+MCP owns bounded log snapshots, agent-facing error hints, and the separate
+Serverless runtime and GraphQL clients.
 
 ## Workflows
 

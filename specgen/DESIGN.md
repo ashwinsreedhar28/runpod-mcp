@@ -84,7 +84,7 @@ env key instead of a bearer token). Every request is independent:
    - fills the URL, splits args into path/query/body
    - calls the SDK:  ctx.sdk.GET('/v2/pods/{podId}', {...})
 
-5. the SDK (vendor/runpod-sdk, bundled into the build)
+5. the published `@runpod/typescript-api-sdk` package (bundled into the build)
    - a thin wrapper over fetch: fills the URL template, adds the
      Authorization header, retries safe requests on 429/5xx
    - sends the real HTTPS request to api.runpod.io/v2
@@ -226,10 +226,10 @@ disagree.
   limiting is the stub: `src/specgen/ops.ts` defines the seat (consulted
   before every call, denial → retryable error with a wait hint);
   enforcement is a later one-function swap to a KV-backed counter.
-- **The SDK is vendored.** `vendor/runpod-sdk` is the built TypeScript SDK,
-  bundled into `dist` so the npm package and the deployment are
-  self-contained. When `@runpod/sdk` is published to npm, delete the vendor
-  dir and depend on it normally.
+- **The SDK comes from npm.** `@runpod/typescript-api-sdk` is a build
+  dependency bundled into both entrypoints. It owns management API retries,
+  request deadlines, and SSE parsing; MCP retains snapshot limits and
+  agent-facing formatting. Node.js 20+ is required.
 - **One surface everywhere.** stdio and hosted serve the same tools and
   skill resources; the legacy hand-written surface (`src/tools.ts`) is
   deleted. The only intended difference is wait budgets: 45 s hosted
@@ -254,7 +254,6 @@ specgen/generator-config.yaml    Box 3: exclusions / description overrides
 specgen/generator/               Box 3: the generator
 specgen/skills/                  Box 3: the ten playbooks
 specgen/old-mcp-tools.yaml       parity map against the old 54-tool server
-vendor/runpod-sdk/               the built TS SDK (bundled; npm publish pending)
 scripts/check-spec-drift.ts      live-vs-vendored spec diff
 tests/specgen-*.test.ts          the gates described in level 4
 ```
