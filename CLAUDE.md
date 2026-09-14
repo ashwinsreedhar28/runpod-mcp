@@ -22,14 +22,14 @@ Prefer using paragraphs to bullet points unless directly asked. When using bulle
 
 ## Architecture
 
-The server communicates with two separate Runpod API backends. The REST API at `https://rest.runpod.io/v1` handles all authenticated CRUD operations for Pods, endpoints, templates, network volumes, and container registry auths. It requires a `RUNPOD_API_KEY` environment variable. The GraphQL API at `https://api.runpod.io/graphql` is reached two ways. The public, unauthenticated path serves read-only discovery queries — GPU types, GPU capacity by CUDA version, data centers, the Hub catalog, Public Endpoints. The authenticated path (`graphqlAuthed`, API key as a Bearer token) serves the handful of write operations that have no REST equivalent: `deploy-hub-repo` and `set-endpoint-gpus`, both of which call the `saveEndpoint` mutation. The two resolve their host from separate env vars on purpose — see `RUNPOD_PUBLIC_GRAPHQL_URL` and `RUNPOD_AUTHED_GRAPHQL_URL` below.
+The server communicates with two separate Runpod API backends. The REST v2 API at `https://api.runpod.io/v2` handles all authenticated CRUD operations for Pods, endpoints, templates, network volumes, clusters, SSH keys, and container registries; the tools covering it are generated from its OpenAPI spec (`pnpm generate:tools`, see `specgen/DESIGN.md`). It requires a `RUNPOD_API_KEY` environment variable. The GraphQL API at `https://api.runpod.io/graphql` is reached two ways. The public, unauthenticated path serves read-only discovery queries — GPU capacity by CUDA version, the Hub catalog, Public Endpoints. The authenticated path (`graphqlAuthed`, API key as a Bearer token) serves the handful of write operations that have no REST equivalent: `deploy-hub-repo`, which calls the `saveEndpoint` mutation. The two resolve their host from separate env vars on purpose — see `RUNPOD_PUBLIC_GRAPHQL_URL` and `RUNPOD_AUTHED_GRAPHQL_URL` below.
 
 The source is split by responsibility:
 
 - `src/stdio.ts` is the local `stdio` entrypoint.
 - `src/http.ts` does bearer-token extraction and the per-request MCP session for the Streamable HTTP transport.
-- `src/tools.ts` contains all Runpod tools and API helpers.
-- `src/server.ts` owns shared server metadata and construction.
+- `src/specgen/` is the tool surface — generated from the v2 OpenAPI spec plus a curated overlay; see `specgen/DESIGN.md`. There is one surface: stdio and hosted serve the same tools and skill resources.
+- `src/server.ts` owns the server name/version constants.
 - `api/index.ts` is the Vercel adapter and hosts the OAuth authorization-server routes (`/.well-known/*`, `/register`, `/authorize`, `/token`).
 
 ### Hosted/OAuth environment variables
@@ -38,15 +38,16 @@ The hosted HTTP path (`api/index.ts` + `src/http.ts`) reads these, all optional 
 
 - `RUNPOD_GRAPHQL_URL`: flash auth backend for the OAuth flow (default `https://api.runpod.io/graphql`). Also the host the hosted credential pre-flight verifies against, so unlike the guest flash-auth mutations it now receives the caller's bearer token — point it only at a host you trust with that.
 - `CONSOLE_BASE_URL`: console that hosts the sign-in handoff page (default `https://console.runpod.io`).
-- `RUNPOD_REST_API_URL` / `RUNPOD_SERVERLESS_API_URL`: override the REST and Serverless API hosts (e.g. for a dev API key).
-- `RUNPOD_PUBLIC_GRAPHQL_URL`: override the public discovery GraphQL host used by `list-gpu-types`, `list-data-centers`, `get-capacity`, `list-hub-repos`, and `list-public-endpoints` (default `https://api.runpod.io/graphql`). Never carries a credential — safe to point at a stub, though note `get-capacity` has no REST fallback on either API version.
-- `RUNPOD_AUTHED_GRAPHQL_URL`: override the GraphQL host for **authenticated** operations with no REST equivalent — `deploy-hub-repo` and `set-endpoint-gpus` (default `https://api.runpod.io/graphql`). These send the caller's API key as a Bearer token, so only point this at a host you trust with it; on the hosted server that key is a per-user OAuth-minted one.
+- `RUNPOD_API_BASE_URL` / `RUNPOD_SERVERLESS_API_URL`: override the REST and Serverless API hosts (e.g. for a dev API key).
+- `RUNPOD_PUBLIC_GRAPHQL_URL`: override the public discovery GraphQL host used by `get-capacity`, `list-hub-repos`, and `list-public-endpoints` (default `https://api.runpod.io/graphql`). Never carries a credential — safe to point at a stub, though note `get-capacity` has no REST fallback on either API version.
+- `RUNPOD_AUTHED_GRAPHQL_URL`: override the GraphQL host for **authenticated** operations with no REST equivalent — `deploy-hub-repo` (default `https://api.runpod.io/graphql`). These send the caller's API key as a Bearer token, so only point this at a host you trust with it; on the hosted server that key is a per-user OAuth-minted one.
 - `RUNPOD_API_KEY_NAME`: name for the minted key (default `runpod-mcp`; set to `""` to omit for a backend without the `apiKeyName` argument).
 - `MCP_VERBOSE_LOGS`: set to `true` to log OAuth request ids (live auth codes) for debugging.
 - `MCP_FLASH_TIMEOUT_MS`: deadline in milliseconds for one call to the flash auth backend during the OAuth flow (default `10000`). Raise it for a slow backend; a value that is not a positive number is ignored, so the deadline cannot be disabled by a typo. The `/token` poll additionally caps itself at 45 seconds total, below the function's `maxDuration`.
+- `POSTHOG_API_KEY` / `POSTHOG_HOST`: enable anonymous per-tool-call usage analytics on the hosted path (see `src/specgen/analytics.ts` for the privacy contract). Unset (the default everywhere but the production Vercel project) means nothing is ever sent. `MCP_ANALYTICS_SALT` sets the HMAC salt for the anonymous caller id (falls back to the PostHog key); clients opt out per request with the `X-Runpod-Analytics: off` header.
 - `MCP_SKIP_CREDENTIAL_CHECK`: set to the exact string `true` to disable the hosted pre-flight credential verification (dead bearers then surface as tool-level 401 errors instead of an HTTP 401 re-auth signal). Use this if the pre-flight itself is ever causing outages. Note the pre-flight ALSO self-disables when a REST/Serverless host is overridden without a matching `RUNPOD_GRAPHQL_URL`, since it would otherwise validate the key against the wrong environment and reject every request.
 
-The build produces `dist/stdio.*`, `dist/http.*`, and `dist/tools.*`. Because `package.json` has `"type": "module"`, always use `dist/stdio.mjs` when running the built local server with `node`.
+The build produces `dist/stdio.*` and `dist/http.*`. Because `package.json` has `"type": "module"`, always use `dist/stdio.mjs` when running the built local server with `node`.
 
 ## Local development
 
@@ -67,34 +68,13 @@ After making changes, rebuild with `pnpm build`. If you are in an active Claude 
 
 ## Adding tools
 
-Tools are registered with `server.tool()`. There are two signatures:
+Most tools are NOT written by hand. The surface under `src/specgen/generated/` is emitted from the vendored v2 OpenAPI spec by `pnpm generate:tools`; a new REST endpoint becomes a tool by re-vendoring the spec (`pnpm spec:pull`) and regenerating. Judgment (exclusions with reasons, description overrides for billable/destructive operations, renames) lives in `specgen/generator-config.yaml` — never edit generated files.
 
-```typescript
-// Without a description
-server.tool('tool-name', { ...zodParams }, async (params) => { ... });
-
-// With a description (recommended when LLM guidance helps)
-server.tool('tool-name', 'Description visible to the LLM', { ...zodParams }, async (params) => { ... });
-```
-
-Use kebab-case names matching the resource pattern: `list-pods`, `get-pod`, `create-pod`, `update-pod`, `delete-pod`. For REST-backed tools, use the `runpodRequest()` helper which handles auth headers, JSON parsing, and error responses. For GraphQL-backed tools, use the `graphqlRequest<T>()` helper which hits the public endpoint without authentication.
-
-Define parameters with Zod schemas, calling `.describe()` on each field and `.optional()` on non-required ones. Add a tool description string when the LLM benefits from guidance, such as recommending a default template. Keep descriptions concise and actionable.
-
-All tool handlers should return the same shape: `{ content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }`.
-
-Tools are grouped by section comments in `src/tools.ts` (infrastructure, Pod management, endpoint management, template management, network volume management, container registry auth). Add new tools in the appropriate section. If adding a new resource category, follow the same comment style.
-
-For transport regressions, use:
-
-```bash
-pnpm smoke:stdio
-pnpm smoke:http
-```
+Hand-written tools (`src/specgen/tools/`) exist only where generation cannot reach: the Serverless runtime plane, GraphQL-only capability, SSE log streams, trimmed list views, and GPU-selection convenience arguments. They implement the `CuratedTool` interface (JSON Schema `inputSchema`, a handler taking the per-request `ToolContext`) and register in `curatedTools` in `src/specgen/server.ts`. The spec-parity gate fails if a spec operation is neither generated nor excluded, and the old-surface parity map (`specgen/old-mcp-tools.yaml`) fails if a mapped tool disappears.
 
 ## Known issues
 
-DELETE endpoints in the Runpod REST API return 204 No Content with no body. The `runpodRequest()` helper handles this by checking `content-type` before parsing JSON, but MCP clients may still surface an "Unexpected end of JSON input" message. The operation succeeds regardless.
+DELETE endpoints may return 204 No Content. The SDK handles bodyless responses; generated dispatch reports their HTTP status.
 
 Pod `publicIp` and `portMappings` fields are empty while the container is initializing. This is Runpod API behavior, not an MCP server bug. Pods need to be polled until they are fully running.
 

@@ -27,10 +27,11 @@ export default defineConfig([
   },
   // http entrypoint + shared tools — library modules, no shebang
   {
-    entry: ['src/http.ts', 'src/tools.ts'],
+    entry: ['src/http.ts'],
     format: ['cjs', 'esm'],
     dts: true,
     sourcemap: true,
+    // Bundle the published SDK in both entrypoints; it is a build dependency.
     noExternal: ['@runpod/typescript-api-sdk'],
     define: {
       __PACKAGE_VERSION__: JSON.stringify(version),
