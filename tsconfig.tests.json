@@ -11,6 +11,6 @@
     "declarationMap": false,
     "composite": false
   },
-  "include": ["src/**/*", "api/**/*", "scripts/**/*", "tests/**/*"],
+  "include": ["src/**/*", "api/**/*", "scripts/**/*", "tests/**/*", "specgen/generator/**/*"],
   "exclude": ["dist", "build", "node_modules"]
 }

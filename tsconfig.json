@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "declaration": true,
@@ -13,6 +13,6 @@
     "rootDir": ".",
     "outDir": "dist"
   },
-  "include": ["src/**/*", "api/**/*", "scripts/**/*"],
+  "include": ["src/**/*", "api/**/*", "scripts/**/*", "specgen/generator/**/*"],
   "exclude": ["dist", "build", "node_modules", "tsup.config.ts", "**/*.test.ts"]
 }

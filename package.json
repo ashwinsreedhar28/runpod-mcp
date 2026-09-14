@@ -30,7 +30,11 @@
     "changeset": "changeset",
     "changeset:version": "changeset version",
     "changeset:publish": "changeset publish",
-    "smoke:crud": "tsx scripts/smoke-crud.ts"
+    "smoke:crud": "tsx scripts/smoke-crud.ts",
+    "generate:tools": "tsx specgen/generator/generate-tools.ts && prettier --write src/specgen/generated/tools.gen.ts",
+    "generate:check": "tsx specgen/generator/generate-tools.ts --check",
+    "spec:check": "tsx scripts/check-spec-drift.ts",
+    "spec:pull": "tsx scripts/pull-spec.ts"
   },
   "exports": {
     "./package.json": "./package.json",
@@ -67,7 +71,8 @@
     "prettier": "^3.6.2",
     "tsup": "^8.0.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": ">=18",
