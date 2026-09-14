@@ -330,7 +330,9 @@ test('a first-poll timeout is a tool error, not a successful cold-start report',
   assert.doesNotMatch(JSON.stringify(result.payload), /cold start/);
 });
 
-test('budget-expiring stream failures retain earlier chunks and upstream status', async () => {
+test('budget-expiring stream failures retain earlier chunks and upstream status', async (t) => {
+  let now = 0;
+  t.mock.method(Date, 'now', () => now);
   const { collectJobStream } = await import('../src/specgen/tools/jobs.js');
   let polls = 0;
   await assert.rejects(
@@ -341,7 +343,7 @@ test('budget-expiring stream failures retain earlier chunks and upstream status'
       poll: async () => {
         if (++polls === 1)
           return { status: 'IN_PROGRESS', stream: ['saved chunk'] };
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        now = 20;
         throw new HttpError('Unavailable', 503, {});
       },
     }),
