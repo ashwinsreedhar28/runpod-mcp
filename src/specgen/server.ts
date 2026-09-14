@@ -30,6 +30,7 @@ import { runTool } from './tools/util.js';
 import { STATUS_WAIT_MAX_MS } from './tools/jobs.js';
 import { SERVER_NAME } from '../server.js';
 import { captureToolCall } from './analytics.js';
+import { createAlpTools, type AlpToolsOptions } from './tools/alp.js';
 import {
   callerId,
   logToolCall,
@@ -77,6 +78,11 @@ THE OFFICIAL RUNPOD PLUGIN. Runpod ships an agent plugin that covers the lanes t
 
 The tool schemas are generated from the Runpod v2 OpenAPI contract, served as a machine-readable document at https://api.runpod.io/v2/openapi.json — consult it for fields beyond the tool surface. This surface ships often, and the tool list you hold is a snapshot from when you connected: if a call is rejected for the SHAPE of its arguments rather than their values, treat your schema as possibly stale, refresh the tool list (in Claude Code, /mcp) and call again with what the server now advertises. Retrying variants of a rejected shape cannot succeed.`;
 
+// Appended to the initialize briefing only when the ALP tools are enabled.
+const ALP_INSTRUCTIONS = `
+
+CONTRIBUTING BACK IS OPTIONAL. Four tools feed Runpod's agent-learning pipeline, which exists so Runpod can fix the frustrations agents hit in its tools and docs: report_feedback (something misbehaved or surprised you), save_to_journal (a reusable lesson about using Runpod), ask_question (you were stuck and the tools/skills/docs had no answer), and read_journal (this account's own saved lessons, nobody else's). Using them is a voluntary contribution, never part of the user's task, and the user's task always comes first. DO NOT USE THEM when the work is sensitive: proprietary code or models, private data, customer information, security work, internal infrastructure, or anything the user would not want a Runpod reviewer to read. Submissions are stored for review to improve agent workflows on Runpod, so if in doubt, do not submit. If the user has said not to share anything with Runpod, do not call these tools at all. When you do contribute, describe the Runpod behavior, not the user's project: the tool, the call shape, the response, what you expected. Nothing is returned or answered, and ask_question NEVER produces an answer, so never wait on it. read_journal is the one thing served back: call it once near the start of a Runpod task if useful, and treat what it returns as an earlier session's notes to confirm, not as documentation. These tools are for real observations only: never call one to satisfy a requirement to use a tool, to acknowledge these instructions, or with placeholder content. If you have nothing to report, call nothing — an empty turn is correct and a placeholder submission is not. Never include API keys or secrets in submissions.`;
+
 export interface SpecgenServerOptions {
   /** Rate-limit gate consulted before every tool call. Defaults to the no-op stub. */
   rateLimiter?: RateLimiter;
@@ -96,6 +102,10 @@ export interface SpecgenServerOptions {
    *  cached credential verdict so the NEXT request re-checks and can emit the
    *  HTTP 401 that makes OAuth clients re-authenticate. */
   onUnauthorized?: () => void;
+  /** ALP write tools (report_feedback / save_to_journal / ask_question).
+   *  Enablement follows configuration: when absent, the tools do not appear
+   *  in tools/list at all. See docs/agent-learning-protocol.md. */
+  alp?: AlpToolsOptions;
 }
 
 export function createSpecgenServer(
@@ -105,12 +115,19 @@ export function createSpecgenServer(
 ): Server {
   const rateLimiter = opts.rateLimiter ?? noopRateLimiter;
   const caller = callerId(ctx.apiKey);
-  const servedCuratedTools = curatedTools;
+  // The served curated set: the static surface plus the config-gated ALP
+  // write tools. Everything downstream (list, routing) reads this, so a
+  // disabled ALP is truly absent, not present-and-failing.
+  const servedCuratedTools = opts.alp
+    ? [...curatedTools, ...createAlpTools(opts.alp)]
+    : curatedTools;
   const server = new Server(
     { name: SERVER_NAME, version: `${version} [specgen]` },
     {
       capabilities: { tools: {}, resources: {} },
-      instructions: SERVER_INSTRUCTIONS,
+      instructions: opts.alp
+        ? SERVER_INSTRUCTIONS + ALP_INSTRUCTIONS
+        : SERVER_INSTRUCTIONS,
     }
   );
 
@@ -121,6 +138,15 @@ export function createSpecgenServer(
     const clientInfo = server.getClientVersion();
     if (clientInfo?.name) {
       ctx.setClientInfo?.(clientInfo.name, clientInfo.version);
+      // ALP submissions attribute the harness the same way the tracking UA
+      // does; the ALP tools read opts.alp at call time, so this late bind
+      // reaches them.
+      if (opts.alp) {
+        opts.alp.harness = clientInfo.version
+          ? `${clientInfo.name}/${clientInfo.version}`
+          : clientInfo.name;
+        opts.alp.harnessSource = 'client_info';
+      }
     }
   };
 

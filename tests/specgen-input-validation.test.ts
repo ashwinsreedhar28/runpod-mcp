@@ -203,10 +203,11 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createSpecgenServer } from '../src/specgen/server.js';
 import { createToolContext } from '../src/specgen/context.js';
 
-async function connectServer() {
+async function connectServer(alp?: { ingestUrl: string }) {
   const server = createSpecgenServer(
     createToolContext({ apiKey: 'rpa_test' }),
-    'test'
+    'test',
+    alp ? { alp: { ...alp, transport: 'http' } } : undefined
   );
   const client = new Client({ name: 'test', version: '1' });
   const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -251,5 +252,21 @@ test('curated tools reject a missing required argument by name', async () => {
   // podId is a path param, not a body: an omission gets the generic recovery
   // hint the 400 path already attaches, never the stale-schema one.
   assert.doesNotMatch(String(body.hint ?? ''), /cached from an earlier version/);
+  await client.close();
+});
+
+test('ALP tools stay fail-soft: an unknown key is ignored, not rejected', async () => {
+  const client = await connectServer({
+    ingestUrl: 'https://ingest.invalid/api/alp/submit',
+  });
+  const { isError, body } = payload(
+    await client.callTool({
+      name: 'report_feedback',
+      arguments: { content: 'x', severty: 'blocked' },
+    })
+  );
+  assert.equal(isError, false, 'ALP never returns an error result');
+  assert.equal(body.error, undefined);
+  assert.equal(typeof body.recorded, 'boolean');
   await client.close();
 });

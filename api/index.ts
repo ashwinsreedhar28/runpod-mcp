@@ -3,6 +3,8 @@ import fetch from 'node-fetch';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { getBaseUrl, handleMcpRequest } from '../src/http.js';
+import { handleAlpSubmit } from '../src/alp/ingest.js';
+import { handleAlpJournalRead } from '../src/alp/read.js';
 import {
   isLoopbackHost,
   validatePkceAuthorization,
@@ -683,6 +685,26 @@ export default async function handler(
 
   if (req.method === 'GET' && pathname === '/authorize') {
     await handleAuthorize(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/alp/submit') {
+    await handleAlpSubmit(
+      req as unknown as import('node:http').IncomingMessage & {
+        body?: unknown;
+      },
+      res as unknown as import('node:http').ServerResponse
+    );
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/alp/journal') {
+    await handleAlpJournalRead(
+      req as unknown as import('node:http').IncomingMessage & {
+        body?: unknown;
+      },
+      res as unknown as import('node:http').ServerResponse
+    );
     return;
   }
 
