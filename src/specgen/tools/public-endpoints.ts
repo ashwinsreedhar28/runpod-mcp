@@ -3,7 +3,7 @@
 // GraphQL query allAiApiPublicConfigs, served unauthenticated. Ported from
 // the official MCP server (Apache-2.0, runpod/runpod-mcp).
 
-import type { CuratedTool } from '../server.js';
+import type { CuratedTool } from '../types.js';
 import { listPaginationProperties, capList } from '../pagination.js';
 import { ok, runTool } from './util.js';
 

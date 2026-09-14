@@ -6,7 +6,7 @@
 // Credential-free: served by the public GraphQL endpoint.
 
 import type { ToolContext } from '../context.js';
-import type { CuratedTool } from '../server.js';
+import type { CuratedTool } from '../types.js';
 import { listPaginationProperties, capList } from '../pagination.js';
 import { badRequest, ok, runTool } from './util.js';
 

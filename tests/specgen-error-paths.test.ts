@@ -383,3 +383,36 @@ test('billing and permission failures give actionable guidance through MCP', asy
     }
   }
 });
+
+test('primitive and array SDK failures retain payloads and recovery guidance through MCP', async (t) => {
+  for (const error of ['permission denied', ['permission denied'], null]) {
+    t.mock.method(
+      globalThis,
+      'fetch',
+      async () =>
+        new Response(JSON.stringify(error), {
+          status: 403,
+          headers: { 'content-type': 'application/json' },
+        })
+    );
+    const ctx = createToolContext({ apiKey: 'fake', sdkRetry: false });
+    const server = createSpecgenServer(ctx, 'test');
+    const client = new Client({ name: 'test', version: '1' });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    try {
+      await Promise.all([server.connect(st), client.connect(ct)]);
+      const result = await client.callTool({
+        name: 'list-pods',
+        arguments: {},
+      });
+      assert.equal(result.isError, true);
+      const payload = JSON.parse(
+        (result.content as Array<{ text: string }>)[0].text
+      );
+      assert.match(payload.hint, /permission/);
+      if (error !== null) assert.deepEqual(payload.error, error);
+    } finally {
+      await Promise.all([client.close(), server.close()]);
+    }
+  }
+});

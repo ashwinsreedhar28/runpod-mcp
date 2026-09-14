@@ -6,7 +6,7 @@
 // and served here as bounded snapshots instead.
 
 import { sdkBase } from '../../_shared/hosts.js';
-import type { CuratedTool } from '../server.js';
+import type { CuratedTool } from '../types.js';
 import { collectLogSnapshot, type LogSnapshotParams } from '../clients/sse.js';
 import { ok, runTool } from './util.js';
 

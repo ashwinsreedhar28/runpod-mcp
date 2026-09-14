@@ -7,7 +7,7 @@
 // reaper clamps every hold to HTTP_LONG_POLL_BUDGET_MS (see HOSTED below).
 
 import { HttpError } from '../clients/http-error.js';
-import type { CuratedTool } from '../server.js';
+import type { CuratedTool } from '../types.js';
 import type { ToolContext } from '../context.js';
 import { badRequest, ok, runTool } from './util.js';
 

@@ -1,7 +1,7 @@
 // GPU-selection convenience tool. REST v2 supports exclusions directly, so a
 // sparse PATCH replaces the legacy GraphQL read/echo/write operation.
 import type { components } from '@runpod/typescript-api-sdk';
-import type { CuratedTool } from '../server.js';
+import type { CuratedTool } from '../types.js';
 import { restError } from '../clients/rest-result.js';
 import { badRequest, ok, runTool } from './util.js';
 

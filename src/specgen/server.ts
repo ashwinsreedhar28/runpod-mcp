@@ -38,19 +38,8 @@ import {
   type RateLimiter,
 } from './ops.js';
 
-export interface CuratedTool {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  handler: (
-    ctx: ToolContext,
-    args: Record<string, unknown>
-  ) => Promise<ToolResult>;
-  /** Skip the argument-shape gate. Only for tools whose contract is to never
-   *  return an error result (the ALP write tools): an unknown key there is
-   *  ignored by the handler rather than rejected, by design. */
-  lenientArguments?: boolean;
-}
+import type { CuratedTool } from './types.js';
+export type { CuratedTool } from './types.js';
 
 // The curated overlay: tools whose backing plane the v2 spec does not cover
 // (Serverless runtime, GraphQL), plus targeted replacements for generated
@@ -295,43 +284,12 @@ export function createSpecgenServer(
     // already on the payload wins: dispatch/runtime derive precise 429 wait
     // instructions from the response headers, and the generic "pause briefly"
     // text must not clobber them.
-    const payload =
-      !result.ok &&
-      typeof result.payload === 'object' &&
-      result.payload !== null
-        ? {
-            ...(result.payload as Record<string, unknown>),
-            hint:
-              (result.payload as Record<string, unknown>).hint ??
-              // runTool nests an HttpError's payload under `detail` — the
-              // runtime client's header-derived 429 hint lives there.
-              ((result.payload as { detail?: { hint?: string } }).detail ?? {})
-                .hint ??
-              errorHint(result.status),
-          }
-        : result.payload;
+    const payload = result.ok ? result.payload : withRecoveryHint(result);
     return {
       content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
       isError: !result.ok,
     };
   });
-
-  function errorHint(status: number): string | undefined {
-    if (status === 400 || status === 422)
-      return "Input shape mismatch: check this tool's schema for required fields. For job payloads, the worker's release config defines the expected input object — fix the payload and retry; don't abandon the task.";
-    if (status === 401) return 'The Runpod API key is missing or invalid.';
-    if (status === 402)
-      return 'Check your account balance in the Runpod console before retrying billable operations.';
-    if (status === 403)
-      return 'Check that this API key has permission for the requested resource and operation. Review its permissions in the Runpod console before retrying.';
-    if (status === 404)
-      return 'No such resource on this account: verify the id with the matching list- tool before retrying.';
-    if (status === 429)
-      return 'Rate limited: pause briefly, then retry the same call.';
-    if (status >= 500)
-      return 'Upstream Runpod error: retry once; if it persists, report it as an API-side failure.';
-    return undefined;
-  }
 
   async function dispatchTool(
     name: string,
@@ -348,4 +306,38 @@ export function createSpecgenServer(
   }
 
   return server;
+}
+
+function errorHint(status: number): string | undefined {
+  if (status === 400 || status === 422)
+    return "Input shape mismatch: check this tool's schema for required fields. For job payloads, the worker's release config defines the expected input object — fix the payload and retry; don't abandon the task.";
+  if (status === 401) return 'The Runpod API key is missing or invalid.';
+  if (status === 402)
+    return 'Check your account balance in the Runpod console before retrying billable operations.';
+  if (status === 403)
+    return 'Check that this API key has permission for the requested resource and operation. Review its permissions in the Runpod console before retrying.';
+  if (status === 404)
+    return 'No such resource on this account: verify the id with the matching list- tool before retrying.';
+  if (status === 429)
+    return 'Rate limited: pause briefly, then retry the same call.';
+  if (status >= 500)
+    return 'Upstream Runpod error: retry once; if it persists, report it as an API-side failure.';
+  return undefined;
+}
+
+function withRecoveryHint(result: ToolResult): Record<string, unknown> {
+  const payload = asRecord(result.payload) ?? { error: result.payload };
+  return {
+    ...payload,
+    hint:
+      payload.hint ??
+      asRecord(payload.detail)?.hint ??
+      errorHint(result.status),
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }

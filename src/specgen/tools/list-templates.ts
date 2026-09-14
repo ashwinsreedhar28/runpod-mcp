@@ -4,7 +4,7 @@
 
 import { restError } from '../clients/rest-result.js';
 import type { ToolContext } from '../context.js';
-import type { CuratedTool } from '../server.js';
+import type { CuratedTool } from '../types.js';
 
 export const listTemplates: CuratedTool = {
   name: 'list-templates',

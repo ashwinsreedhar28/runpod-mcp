@@ -3,7 +3,7 @@
 // the authenticated saveEndpoint mutation pinned to a hubReleaseId. Ported
 // from the official MCP server (Apache-2.0, runpod/runpod-mcp).
 
-import type { CuratedTool } from '../server.js';
+import type { CuratedTool } from '../types.js';
 import { listPaginationProperties, capList } from '../pagination.js';
 import type { ToolResult } from '../dispatch.js';
 import { badRequest, ok, runTool } from './util.js';

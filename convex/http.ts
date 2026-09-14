@@ -20,11 +20,9 @@ http.route({
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    let body: Record<string, unknown>;
-    try {
-      body = (await request.json()) as Record<string, unknown>;
-    } catch {
-      return new Response(JSON.stringify({ error: 'invalid JSON' }), {
+    const body = await readObjectBody(request);
+    if (!body) {
+      return new Response(JSON.stringify({ error: 'expected a JSON object' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -77,11 +75,9 @@ http.route({
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    let body: Record<string, unknown>;
-    try {
-      body = (await request.json()) as Record<string, unknown>;
-    } catch {
-      return new Response(JSON.stringify({ error: 'invalid JSON' }), {
+    const body = await readObjectBody(request);
+    if (!body) {
+      return new Response(JSON.stringify({ error: 'expected a JSON object' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -108,3 +104,12 @@ http.route({
 });
 
 export default http;
+
+async function readObjectBody(
+  request: Request
+): Promise<Record<string, unknown> | null> {
+  const body: unknown = await request.json().catch(() => null);
+  return body !== null && typeof body === 'object' && !Array.isArray(body)
+    ? (body as Record<string, unknown>)
+    : null;
+}

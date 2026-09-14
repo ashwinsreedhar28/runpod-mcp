@@ -140,11 +140,8 @@ function normalizeUrl(raw: string): string {
 // RUNPOD_AUTHED_GRAPHQL_URL, this guard is silently disabling the gate in production
 // right now. Run `vercel env ls production` to settle it.
 function credentialCheckMayBeWrongEnvironment(env = process.env): boolean {
-  // Normalised, not byte-exact: a trailing slash, host casing or an empty string
-  // is not a different environment. Empty is treated as unset HERE, because the
-  // ??-based resolvers in _shared/hosts.ts do NOT fall through on '' — so every
-  // resolver below must read envWithoutEmpties, or an empty var on one side
-  // makes restMoved and graphqlMoved disagree and silently disables the gate.
+  // Compare normalized destinations so formatting differences do not disable
+  // the credential preflight. Host resolvers treat blank overrides as unset.
   const envWithoutEmpties = Object.fromEntries(
     Object.entries(env).filter(([, v]) => v !== '')
   ) as Record<string, string | undefined>;

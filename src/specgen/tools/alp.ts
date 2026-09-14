@@ -22,7 +22,7 @@ import {
   type JournalEntry,
 } from '../../alp/read.js';
 import type { ToolContext } from '../context.js';
-import type { CuratedTool } from '../server.js';
+import type { CuratedTool } from '../types.js';
 import { ok } from './util.js';
 
 // HOSTED-ONLY by decision (2026-09-03): src/http.ts registers these tools
