@@ -248,13 +248,15 @@ test('queued jobs with only throttled workers still direct callers to logs', asy
   assert.doesNotMatch(String(payload.hint), /the hosts are at capacity/);
 });
 
-test('status polling does not sleep or start another request beyond its budget', async () => {
+test('status polling does not sleep or start another request beyond its budget', async (t) => {
+  // Hold wall time before the deadline to model a timer waking early.
+  t.mock.method(Date, 'now', () => 0);
   let calls = 0;
-  const started = Date.now();
+  const started = performance.now();
   const result = await pollJobStatus({
     fetchStatus: async () => {
       calls++;
-      return { status: 'IN_QUEUE' };
+      return { status: calls === 1 ? 'IN_QUEUE' : 'COMPLETED' };
     },
     budgetMs: 30,
     pollIntervalMs: 1000,
@@ -262,7 +264,7 @@ test('status polling does not sleep or start another request beyond its budget',
   assert.equal(calls, 1);
   assert.equal(result.pollingTimedOut, true);
   assert.ok(
-    Date.now() - started < 500,
+    performance.now() - started < 500,
     'the polling interval must fit inside the budget'
   );
 });

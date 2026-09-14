@@ -146,6 +146,9 @@ async function pollUntilTerminal(deps: {
 
     const remainingMs = Math.max(0, deps.budgetMs - elapsed());
     await sleep(Math.min(deps.pollIntervalMs, remainingMs));
+    // If the next poll cannot fit after its interval, this was the final wait.
+    // Timers can wake slightly early; do not turn that into an extra request.
+    if (remainingMs <= deps.pollIntervalMs) break;
   }
 
   if (lastError !== undefined) {
