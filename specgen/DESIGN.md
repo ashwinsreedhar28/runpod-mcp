@@ -132,7 +132,7 @@ generation cannot reach:
 | why hand-written                  | tools                                   |
 | --------------------------------- | --------------------------------------- |
 | no OpenAPI doc for that plane      | run/runsync/status/stream/cancel jobs   |
-| GraphQL-only capability            | capacity matrix, Hub, GPU pinning       |
+| GraphQL-only capability            | capacity matrix, Hub       |
 | non-JSON transport (SSE)           | stream-pod-logs, stream-worker-logs     |
 | raw output too big for a model     | list-templates, list-endpoints (trimmed)|
 

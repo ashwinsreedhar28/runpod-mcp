@@ -1,66 +1,66 @@
-// Curated set-endpoint-gpus tool. Pinning specific GPU SKUs needs the GraphQL
-// `gpuIds` string ("POOL[,POOL...][,-<GPU type id>...]") — REST's gpu field is
-// {pools, count} with no SKU exclusion, so this capability has no REST home.
-// Ported from the official MCP server (Apache-2.0, runpod/runpod-mcp).
-//
-// The GraphQL saveEndpoint mutation is NOT a sparse update — unlike the REST
-// PATCH, an id+name+gpuIds-only call resets workersMax, idleTimeout, and
-// scalerValue to server defaults — so this tool reads the endpoint and echoes
-// every field back with only gpuIds (and gpuCount/CUDA fields) changed. Read
-// shapes are
-// not write shapes: networkVolumeIds reads {networkVolumeId, dataCenterId}
-// but NetworkVolumeIdsInput accepts networkVolumeId ONLY.
-
+// GPU-selection convenience tool. REST v2 supports exclusions directly, so a
+// sparse PATCH replaces the legacy GraphQL read/echo/write operation.
+import type { components } from '@runpod/typescript-api-sdk';
 import type { CuratedTool } from '../server.js';
+import { restError } from '../clients/rest-result.js';
 import { badRequest, ok, runTool } from './util.js';
 
-interface EndpointSnapshot {
-  id: string;
-  name: string;
-  gpuIds: string;
-  gpuCount: number;
-  workersMin: number;
-  workersMax: number;
-  idleTimeout: number;
-  scalerType: string;
-  scalerValue: number;
-  executionTimeoutMs: number;
-  flashBootType: string;
-  type: string;
-  locations: string | null;
-  templateId: string | null;
-  // A comma-separated String on read AND write, not a list.
-  allowedCudaVersions: string | null;
-  minCudaVersion: string | null;
-  // A [Compliance] enum on input — read values are already enum names, pass
-  // back verbatim.
-  compliance: string[] | null;
-  modelReferences: string[] | null;
-  networkVolumeIds: Array<{
-    networkVolumeId: string;
-    dataCenterId: string | null;
-  }> | null;
+type GpuSelection = { pools: string[]; excludedTypes: string[] };
+const CUDA_VERSION = /^\d+\.\d+$/;
+
+function nonemptyStrings(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => typeof item === 'string' && item.trim().length > 0)
+  );
 }
 
-interface MyEndpointsResponse {
-  myself: { endpoints: EndpointSnapshot[] };
-}
-
-interface SaveEndpointResponse {
-  saveEndpoint: {
-    id: string;
-    name: string;
-    gpuIds: string;
-    gpuCount: number;
-    workersMin: number;
-    workersMax: number;
+function gpuSelection(args: Record<string, unknown>): GpuSelection | string {
+  if (args.gpuIds !== undefined) {
+    if (typeof args.gpuIds !== 'string' || !args.gpuIds.trim())
+      return 'gpuIds must be a non-empty string.';
+    const selection: GpuSelection = { pools: [], excludedTypes: [] };
+    for (const value of args.gpuIds.split(',').map((value) => value.trim())) {
+      if (!value || value === '-')
+        return 'gpuIds contains an empty pool or GPU exclusion.';
+      if (value.startsWith('-'))
+        selection.excludedTypes.push(value.slice(1).trim());
+      else selection.pools.push(value);
+    }
+    return selection.pools.length
+      ? selection
+      : 'gpuIds must include at least one GPU pool.';
+  }
+  if (!nonemptyStrings(args.pools) || args.pools.length === 0)
+    return 'Provide gpuIds or a non-empty pools array. See list-gpu-types for pool names.';
+  if (
+    args.excludeGpuTypeIds !== undefined &&
+    !nonemptyStrings(args.excludeGpuTypeIds)
+  )
+    return 'excludeGpuTypeIds must be an array of non-empty strings.';
+  return {
+    pools: args.pools.map((value) => value.trim()),
+    excludedTypes:
+      (args.excludeGpuTypeIds as string[] | undefined)?.map((value) =>
+        value.trim()
+      ) ?? [],
   };
+}
+
+function formatGpuIds(gpu: {
+  pools?: string[];
+  excludedTypes?: string[];
+}): string {
+  return [
+    ...(gpu.pools ?? []),
+    ...(gpu.excludedTypes ?? []).map((id) => `-${id}`),
+  ].join(',');
 }
 
 export const setEndpointGpus: CuratedTool = {
   name: 'set-endpoint-gpus',
   description:
-    "Set which GPUs a Serverless endpoint's workers run on — including pinning specific GPU SKUs, which create-endpoint/update-endpoint cannot express. Provide either a raw gpuIds string, or pools plus optional excludeGpuTypeIds (GPU type ids from list-gpu-types) and the exclusion string is built for you: a pool allows every SKU in it, and excluding all but one SKU pins that SKU exactly. All other endpoint settings (workers, scaling, timeouts, template) are read first and preserved. Uses the authenticated GraphQL API.",
+    "Set which GPUs a Serverless endpoint's workers run on — including pinning specific GPU SKUs. Provide either a raw gpuIds string, or pools plus optional excludeGpuTypeIds (GPU type ids from list-gpu-types) and the exclusion string is built for you: a pool allows every SKU in it, and excluding all but one SKU pins that SKU exactly. Updates only GPU settings through REST v2, preserving other endpoint settings. create-endpoint/update-endpoint also support gpu.excludedTypes.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -93,137 +93,99 @@ export const setEndpointGpus: CuratedTool = {
       minCudaVersion: {
         type: 'string',
         description:
-          "Minimum host CUDA version workers may run on (e.g. '12.4'). Omit to keep the current value.",
+          "Minimum host CUDA version workers may run on (e.g. '12.4'). Omit to keep the current value; use an empty string to clear it.",
       },
       allowedCudaVersions: {
         type: 'string',
         description:
-          "Comma-separated allowed host CUDA versions (e.g. '12.8,12.7,12.6'). Omit to keep the current value. CUDA compatibility is part of GPU selection — a narrow list can leave an endpoint unable to schedule workers.",
+          "Comma-separated allowed host CUDA versions (e.g. '12.8,12.7,12.6'). Omit to keep the current value; use an empty string to clear the list. CUDA compatibility is part of GPU selection — a narrow list can leave an endpoint unable to schedule workers.",
       },
     },
     required: ['endpointId'],
   },
   handler: (ctx, args) =>
     runTool(async () => {
-      const pools = args.pools as string[] | undefined;
-      const gpuIds =
-        (args.gpuIds as string | undefined) ??
-        (pools && pools.length > 0
-          ? [
-              ...pools,
-              ...((args.excludeGpuTypeIds as string[] | undefined) ?? []).map(
-                (id) => `-${id}`
-              ),
-            ].join(',')
-          : undefined);
-      if (!gpuIds) {
+      const selection = gpuSelection(args);
+      if (typeof selection === 'string') return badRequest(selection);
+      if (typeof args.endpointId !== 'string' || !args.endpointId.trim())
+        return badRequest('endpointId must be a non-empty string.');
+      if (
+        args.gpuCount !== undefined &&
+        (!Number.isSafeInteger(args.gpuCount) || Number(args.gpuCount) < 1)
+      )
+        return badRequest('gpuCount must be a positive integer.');
+      if (
+        args.minCudaVersion !== undefined &&
+        (typeof args.minCudaVersion !== 'string' ||
+          (args.minCudaVersion !== '' &&
+            !CUDA_VERSION.test(args.minCudaVersion)))
+      )
         return badRequest(
-          'Provide gpuIds (raw string) or pools (with optional excludeGpuTypeIds). See list-gpu-types for pool names and GPU type ids.'
+          'minCudaVersion must be major.minor, or an empty string to clear it.'
         );
-      }
-
-      // Read the endpoint's current settings — saveEndpoint resets omitted
-      // endpoint-level fields to defaults, so everything must be echoed back.
-      const data = await ctx.graphql.authed<MyEndpointsResponse>(`
-        query {
-          myself {
-            endpoints {
-              id
-              name
-              gpuIds
-              gpuCount
-              workersMin
-              workersMax
-              idleTimeout
-              scalerType
-              scalerValue
-              executionTimeoutMs
-              flashBootType
-              type
-              locations
-              templateId
-              allowedCudaVersions
-              minCudaVersion
-              compliance
-              modelReferences
-              networkVolumeIds {
-                networkVolumeId
-                dataCenterId
-              }
-            }
-          }
-        }
-      `);
-      // `myself` is nullable for some auth states — a dead token must come
-      // back as a tool error, not a TypeError that crashes the request.
-      const current = data.myself?.endpoints?.find(
-        (e) => e.id === args.endpointId
-      );
-      if (!current) {
+      if (
+        args.allowedCudaVersions !== undefined &&
+        typeof args.allowedCudaVersions !== 'string'
+      )
         return badRequest(
-          `No Serverless endpoint found with id "${args.endpointId}". Use list-endpoints to see your endpoints.`
+          'allowedCudaVersions must be a comma-separated string.'
         );
-      }
+      const allowed =
+        typeof args.allowedCudaVersions === 'string'
+          ? args.allowedCudaVersions
+              .split(',')
+              .map((value) => value.trim())
+              .filter(Boolean)
+          : undefined;
+      if (allowed?.some((value) => !CUDA_VERSION.test(value)))
+        return badRequest(
+          'allowedCudaVersions must contain major.minor versions.'
+        );
+      if (allowed?.length && args.minCudaVersion)
+        return badRequest(
+          'Set either allowedCudaVersions or minCudaVersion, not both.'
+        );
 
-      const input: Record<string, unknown> = {
-        id: current.id,
-        name: current.name,
-        gpuIds,
-        gpuCount: (args.gpuCount as number | undefined) ?? current.gpuCount,
-        workersMin: current.workersMin,
-        workersMax: current.workersMax,
-        idleTimeout: current.idleTimeout,
-        scalerType: current.scalerType,
-        scalerValue: current.scalerValue,
-        executionTimeoutMs: current.executionTimeoutMs,
-        flashBootType: current.flashBootType,
-        type: current.type,
-        locations: current.locations,
-        networkVolumeIds:
-          current.networkVolumeIds && current.networkVolumeIds.length > 0
-            ? // Drop dataCenterId: NetworkVolumeIdsInput takes networkVolumeId
-              // ONLY; the read shape is rejected outright.
-              current.networkVolumeIds.map((v) => ({
-                networkVolumeId: v.networkVolumeId,
-              }))
-            : null,
+      const params = { path: { id: args.endpointId } };
+      const current = await ctx.sdk.GET('/v2/serverless/{id}', { params });
+      if (!current.response.ok)
+        return restError(current.response, current.error);
+      if (!current.data?.gpu)
+        return badRequest('This endpoint does not have a GPU configuration.');
+      const gpu: components['schemas']['UpdateEndpointGpuConfig'] = {
+        ...selection,
+        ...(args.gpuCount !== undefined
+          ? { count: args.gpuCount as number }
+          : {}),
+        ...(args.minCudaVersion !== undefined
+          ? { minCudaVersion: args.minCudaVersion as string }
+          : {}),
+        ...(allowed !== undefined ? { allowedCudaVersions: allowed } : {}),
       };
-
-      // Echoed only when set. Omitting a field that currently reads null
-      // resets it to a default that is already null, while an explicit null
-      // risks a server-side type rejection for no gain.
-      for (const [key, value] of Object.entries({
-        templateId: current.templateId,
-        allowedCudaVersions:
-          (args.allowedCudaVersions as string | undefined) ??
-          current.allowedCudaVersions,
-        minCudaVersion:
-          (args.minCudaVersion as string | undefined) ?? current.minCudaVersion,
-        compliance: current.compliance,
-        modelReferences: current.modelReferences,
-      })) {
-        if (value !== null && value !== undefined) input[key] = value;
-      }
-
-      const result = await ctx.graphql.authed<SaveEndpointResponse>(
-        `
-          mutation saveEndpoint($input: EndpointInput!) {
-            saveEndpoint(input: $input) {
-              id
-              name
-              gpuIds
-              gpuCount
-              workersMin
-              workersMax
-            }
-          }
-        `,
-        { input }
-      );
-
+      const updated = await ctx.sdk.PATCH('/v2/serverless/{id}', {
+        params,
+        body: { gpu },
+      });
+      if (!updated.response.ok)
+        return restError(updated.response, updated.error);
+      const updatedGpu = updated.data?.gpu;
+      if (!updated.data || !updatedGpu)
+        return {
+          ok: false,
+          status: 502,
+          payload: { error: 'The API returned no updated GPU endpoint.' },
+        };
+      const endpoint = updated.data;
       return ok({
-        endpoint: result.saveEndpoint,
-        previousGpuIds: current.gpuIds,
+        endpoint: {
+          id: endpoint.id,
+          name: endpoint.name,
+          gpuIds: formatGpuIds(updatedGpu),
+          gpuCount: updatedGpu.count,
+          workersMin: endpoint.workers?.min,
+          workersMax: endpoint.workers?.max,
+        },
+        previousGpuIds: formatGpuIds(current.data.gpu),
       });
     }),
 };

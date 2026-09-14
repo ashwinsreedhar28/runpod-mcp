@@ -4,7 +4,7 @@
 
 import type { RunpodClient } from '@runpod/typescript-api-sdk';
 import type { GeneratedTool } from './generated/tools.gen.js';
-import { withRateLimitHint } from '../_shared/rate-limit.js';
+import { restError } from './clients/rest-result.js';
 
 // A client caches tools/list when it connects. If the served surface changes
 // under a live session — a release, or a deployment alias moving — the client
@@ -146,20 +146,7 @@ export async function dispatchGeneratedTool(
   // (Content-Length: 0 — a WAF/edge answering a bare 429/403/502 does this),
   // and treating that as success would tell the agent a failed call worked
   // and bypass the 401 onUnauthorized gate.
-  if (!response.ok) {
-    const body =
-      error !== undefined
-        ? error
-        : { error: response.statusText || `HTTP ${response.status}` };
-    // A 429's bare "rate limit exceeded" invites an immediate retry; turn the
-    // response's RateLimit/Retry-After headers into a concrete wait
-    // instruction (ported from the pre-specgen server).
-    const payload =
-      response.status === 429
-        ? withRateLimitHint(body, response.headers)
-        : body;
-    return { ok: false, status: response.status, payload };
-  }
+  if (!response.ok) return restError(response, error);
   return {
     ok: true,
     status: response.status,

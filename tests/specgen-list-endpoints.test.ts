@@ -1,6 +1,7 @@
 // The trimmed list-endpoints overlay: drops env/requestUrls, paginates.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { listTemplates } from '../src/specgen/tools/list-templates.js';
 import { listEndpoints } from '../src/specgen/tools/list-endpoints.js';
 import type { ToolContext } from '../src/specgen/context.js';
 
@@ -96,4 +97,21 @@ test('capList survives limit 0, junk cursors, and out-of-range offsets', async (
     { limit: 10_000 }
   );
   assert.equal((huge.items as unknown[]).length, MAX_LIST_LIMIT);
+});
+
+test('list overlays report malformed upstream collections as gateway errors', async () => {
+  for (const tool of [listEndpoints, listTemplates]) {
+    for (const data of [
+      undefined,
+      {},
+      { endpoints: {}, templates: 'invalid' },
+    ]) {
+      const ctx = {
+        sdk: { GET: async () => ({ data, response: new Response(null) }) },
+      } as unknown as ToolContext;
+      const result = await tool.handler(ctx, {});
+      assert.equal(result.ok, false);
+      assert.equal(result.status, 502);
+    }
+  }
 });

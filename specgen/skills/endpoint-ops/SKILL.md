@@ -7,7 +7,7 @@ description: Operate a Serverless endpoint that already exists — diagnose stuc
 
 You operate a Serverless endpoint that already exists. Everything starts by reading its current state — the endpoint config, its health, its workers, its logs — before you say anything or change anything. Diagnosis is always read-only. You change a setting only when the user asked for a change, and then only the exact setting agreed.
 
-One property of the Runpod update path drives the central rule here: an endpoint update is a genuine PATCH — only the fields present in the body change, and omitted fields are left untouched — so you send exactly the setting you were asked to change and nothing else. What the PATCH does not give you is proof: its own response is not a read. Read the config first for the before value, and read it back afterward for the after value. (The GPU-pin path behaves differently — see phase 2.)
+One property of the Runpod update path drives the central rule here: an endpoint update is a genuine PATCH — only the fields present in the body change, and omitted fields are left untouched — so you send exactly the setting you were asked to change and nothing else. What the PATCH does not give you is proof: its own response is not a read. Read the config first for the before value, and read it back afterward for the after value.
 
 ## Required capabilities
 
@@ -18,7 +18,7 @@ Named as capabilities; the tool serving each one on this server is in the per-se
 - Read a worker's logs — the crash / model-load failure line.
 - Read GPU stock per data center, and the capacity matrix across host CUDA versions — is a stuck queue a capacity problem.
 - Update an endpoint (worker min/max, idle timeout, scaler, FlashBoot, disk, env) — the gated tune.
-- Pin GPUs / set GPU count — the validated-card pin the plain update can't express.
+- Pin GPUs / set GPU count — select pools and exclude unwanted GPU types with a sparse update.
 - Read release history — which build the workers are running.
 - Cancel one job; purge the queue — the queue-management actions, each gated.
 - Submit and poll a job — to re-verify after a change.
@@ -40,7 +40,7 @@ Advance only when the prompt asks to change a *named* endpoint's setting.
 
 - **The read-back invariant.** Read the endpoint's full config first, so you hold the before values. Apply the change as a PATCH carrying only the fields the user authorized — sending fields you were not asked about is how you overwrite a setting they tuned by hand. Then read the config back and confirm the target field holds its new value and the neighbours you quoted are unchanged.
 - **Autoscaling tune, bursty traffic.** For bursty workloads (e.g. transcription that arrives in waves), tune the scaler and worker band: raise max workers for the burst ceiling, set the queue-delay or request-count scaler target to how fast you want to absorb the burst, and set idle timeout to how long to hold warm workers between waves. Change only the fields the user agreed; state the cost of a higher min-worker.
-- **Pin to a validated GPU.** When the user wants the endpoint locked to a card they validated, pin the GPU SKU / pools (and CUDA floor if given). This is the SKU pin the plain update path can't express; if the connected server has no GPU-pin tool, say so — pinning a specific SKU is not available there. Unlike the REST PATCH, the pin goes through the GraphQL `saveEndpoint` mutation, which is **not** a sparse update: a save that omits fields resets them (workersMax, idleTimeout, scalerValue) to server defaults, which is why the pin tool re-sends the endpoint's whole config. Read the endpoint back after a pin and confirm the scaling settings survived.
+- **Pin to a validated GPU.** Read the GPU catalog to find the pool and its GPU types. Use `set-endpoint-gpus` with the pool and exclusions for unwanted types, or `update-endpoint` with `body.gpu.pools` and `body.gpu.excludedTypes`. Both paths use sparse REST PATCH. Set only the requested GPU count or CUDA constraints, and read back the GPU and scaling settings after the change.
 
 ## Phase 3 — manage the queue (gated actions)
 
@@ -60,11 +60,11 @@ Advance only when the prompt asks to change a *named* endpoint's setting.
 
 ## Error handling
 
-- A setting nobody touched comes back changed → it was not the PATCH, which leaves omitted fields untouched; look at the other write paths — a GPU pin (GraphQL `saveEndpoint`, a whole-config save), a redeploy, or a concurrent change by someone else. Re-read before re-applying anything.
+- An unrelated setting comes back changed → compare the actual update body and check for a redeploy or concurrent write. Both REST update tools leave omitted fields untouched. Re-read before re-applying anything.
 - `IN_QUEUE` with healthy workers and free capacity → the scaler hasn't spun a worker yet; give it a moment and re-read health rather than force-changing settings.
 - Worker logs show OOM → the GPU is undersized; the fix is a bigger GPU (re-deploy via `serverless-deploy`), not a scaler tweak.
 - Cancel/purge returns success but health still shows queued jobs → re-read after a moment; the queue count settles slightly after the action.
-- A GPU-pin request on a server without the pin tool → say SKU pinning is not available on this server; offer the pool-level constraint the update path can express instead.
+- A GPU-pin request on a server without the convenience tool → inspect the update schema for GPU pools and exclusions. If neither path is available, report that limitation.
 
 ## Per-server tool binding
 
@@ -77,7 +77,7 @@ Advance only when the prompt asks to change a *named* endpoint's setting.
 | GPU stock per data center | `list-gpu-types` (`include:["AVAILABILITY"]`), `get-gpu-type` | `list-gpu-types` |
 | Capacity matrix (per host CUDA version) | `get-capacity` | *(unbound — GraphQL-only)* |
 | Update endpoint settings | `update-endpoint` | `update-endpoint` |
-| Pin GPUs / set GPU count | `set-endpoint-gpus` | *(unbound — no SKU pin)* |
+| Pin GPUs / set GPU count | `set-endpoint-gpus` | `update-endpoint` (`gpu.count`, `gpu.pools`, `gpu.excludedTypes`) |
 | Release history | `list-endpoint-releases` | *(unbound)* |
 | Cancel one job | `cancel-job` | *(varies)* |
 | Purge the queue | `purge-endpoint-queue` | *(varies)* |
