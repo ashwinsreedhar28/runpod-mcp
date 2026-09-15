@@ -142,8 +142,15 @@ See [`docs/configuration.md`](docs/configuration.md) for host overrides, private
 
 ## The tool surface
 
-Hosted and local serve the same **68 tools** (51 generated from the v2 OpenAPI
-spec + 17 curated). Both transports also serve the ten Runpod task playbooks as MCP resources under
+Hosted and local serve the same surface, with one deliberate exception: **68
+tools** (51 generated from the v2 OpenAPI spec + 17 curated) on both, plus the
+four hosted-only ALP tools — `report_feedback`, `save_to_journal`,
+`ask_question`, and `read_journal`, which returns the calling account's own
+journal and nobody else's — for **72 hosted**. Those four need storage credentials the
+npm package cannot hold, so local stdio never registers them and they are
+simply absent from `tools/list` (see
+[`docs/agent-learning-protocol.md`](docs/agent-learning-protocol.md)). Both
+transports also serve the ten Runpod task playbooks as MCP resources under
 `runpod://skills/`. New API endpoints become
 tools by regeneration, not by hand-writing code. Start with
 [specgen/DESIGN.md](specgen/DESIGN.md) for a progressive walkthrough, and

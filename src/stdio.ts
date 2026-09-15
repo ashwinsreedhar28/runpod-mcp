@@ -14,6 +14,8 @@ async function main(apiKey: string): Promise<void> {
   // One surface everywhere: stdio serves the same spec-generated tool set
   // and skill resources the hosted path serves (see specgen/DESIGN.md).
   // stdio keeps the 5-minute wait budgets — no gateway reaper applies here.
+  // ALP write tools are hosted-only by decision (docs/agent-learning-protocol.md):
+  // the stdio path never registers them, so local users cannot enable them.
   const server = createSpecgenServer(
     createToolContext({
       apiKey,
