@@ -226,7 +226,10 @@ function buildTool(
   const required: string[] = [];
   const params: GeneratedToolParam[] = [];
   for (const param of operationParameters(pathItem, op, spec)) {
-    if (param.in !== 'path' && param.in !== 'query') continue;
+    if (param.in !== 'path' && param.in !== 'query')
+      throw new Error(
+        `Unsupported parameter location ${param.in}: ${op.operationId}`
+      );
     if (!param.name)
       throw new Error(`Missing parameter name: ${op.operationId}`);
     if (Object.hasOwn(properties, param.name))
@@ -299,10 +302,15 @@ export function generateTools(
   );
   const tools: GeneratedTool[] = [];
   const names = new Set<string>();
+  const unmatchedExclusions = new Set(Object.keys(config.exclude ?? {}));
   for (const [path, pathItem] of Object.entries(spec.paths)) {
     for (const method of HTTP_METHODS) {
       const op = pathItem[method];
-      if (!op || Object.hasOwn(config.exclude ?? {}, op.operationId)) continue;
+      if (!op) continue;
+      if (Object.hasOwn(config.exclude ?? {}, op.operationId)) {
+        unmatchedExclusions.delete(op.operationId);
+        continue;
+      }
       const tool = buildTool(path, method, pathItem, op, spec, config, defs);
       if (names.has(tool.name))
         throw new Error(`Duplicate tool name: ${tool.name}`);
@@ -310,5 +318,9 @@ export function generateTools(
       tools.push(tool);
     }
   }
+  if (unmatchedExclusions.size)
+    throw new Error(
+      `Excluded operations missing from spec: ${[...unmatchedExclusions].sort().join(', ')}`
+    );
   return tools.sort((a, b) => a.name.localeCompare(b.name));
 }

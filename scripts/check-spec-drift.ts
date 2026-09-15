@@ -68,6 +68,6 @@ for (const id of changed)
     `  ~ ${id} — request body, parameters, or referenced schemas changed`
   );
 console.error(
-  '\nFix: re-vendor the spec and regenerate (specgen/README.md), then run pnpm test.'
+  '\nFix: run pnpm spec:pull, pnpm generate:tools, and pnpm test; review and commit the resulting changes.'
 );
 process.exit(1);

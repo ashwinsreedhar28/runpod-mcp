@@ -1,10 +1,9 @@
 # Controls the spec-to-tools generation. Every operation in spec/openapi.yaml
 # becomes a tool unless excluded here; the parity test enforces exactly that.
 
-# Operations excluded from generation, each with its reason and — where one
-# exists — the curated tool in src/tools/ that replaces it. The parity test
-# reads this mapping: an exclusion with no entry here fails it, and a
-# replacedBy naming a tool the server does not serve fails it too.
+# The generator rejects exclusions whose operationId is absent from the spec.
+# replacedBy identifies the curated replacement in src/specgen/tools/; once
+# the server is wired, tests/specgen-gates.test.ts checks replacement registration.
 exclude:
   listEndpoints:
     replacedBy: list-endpoints
