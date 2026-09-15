@@ -859,6 +859,65 @@ test('scrub catches nested YAML and Compose assignments without consuming child 
   assert.equal(scrub('db:\n  host: localhost').text, 'db:\n  host: localhost');
 });
 
+// Stage D is a hand-written scan rather than one regex because these two
+// requirements look contradictory to a character class: a URL's `&` starts the
+// next parameter, and a password's `&` is just a character. The old value
+// class excluded `&#` unconditionally, so it satisfied the first and truncated
+// the second, leaking everything after the `&`.
+test('config values keep & and # unless the key sits in a URL query', () => {
+  for (const [input, expected] of [
+    ['password: p&ss#word123', 'password: [redacted:config]'],
+    ['password=abc&def', 'password=[redacted:config]'],
+    ['secret: a#b&c;other=1', 'secret: [redacted:config];other=1'],
+  ] as const) {
+    const result = scrub(input);
+    assert.equal(result.text, expected, input);
+    assert.equal(result.redactions, 1, input);
+    assert.deepEqual(scrub(result.text), { text: result.text, redactions: 0 });
+  }
+  // The query-string side of the same rule: each parameter is bounded, so the
+  // names and the non-secret fields survive.
+  const url = scrub('https://h/p?token=aaaaaa&mode=fast#frag');
+  assert.equal(url.text, 'https://h/p?token=[redacted:query]&mode=fast#frag');
+  assert.equal(url.redactions, 1);
+});
+
+// A key that is not sensitive can still have a sensitive assignment inside its
+// value. `https://h/?password=x` parses as key `https` whose value is the rest
+// of the URL, and the regex consumed it wholesale — so the password was never
+// examined and passed through in plaintext.
+test('a sensitive assignment inside a non-sensitive value is still redacted', () => {
+  for (const [input, expected] of [
+    [
+      'https://x.test/?password=secret123456',
+      'https://x.test/?password=[redacted:config]',
+    ],
+    ['note: db_password=hunter2hunter2', 'note: db_password=[redacted:config]'],
+  ] as const) {
+    const result = scrub(input);
+    assert.equal(result.text, expected, input);
+    assert.equal(result.redactions, 1, input);
+    assert.deepEqual(scrub(result.text), { text: result.text, redactions: 0 });
+  }
+});
+
+// Truncated pastes are the common case for a credential someone is reporting,
+// so an unbalanced or unterminated quote must not disable redaction.
+test('config redaction survives unbalanced and unterminated quotes', () => {
+  assert.equal(
+    scrub('password": x_secret_value').text,
+    'password": [redacted:config]'
+  );
+  assert.equal(
+    scrub('password: "abc_secret_value').text,
+    'password: "[redacted:config]"'
+  );
+  assert.equal(
+    scrub("{'clientSecret': 'fake-value'}").text,
+    "{'clientSecret': '[redacted:config]'}"
+  );
+});
+
 test('scrub catches Hugging Face tokens and URL query secrets idempotently', () => {
   const hf = 'hf_' + 'a'.repeat(34);
   assert.equal(
