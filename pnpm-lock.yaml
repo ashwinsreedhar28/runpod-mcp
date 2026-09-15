@@ -28,7 +28,7 @@ importers:
         specifier: ^2.29.6
         version: 2.29.7(@types/node@20.19.24)
       '@runpod/typescript-api-sdk':
-        specifier: ^0.1.0
+        specifier: 0.1.1
         version: 0.1.1
       '@types/node':
         specifier: ^20.10.5

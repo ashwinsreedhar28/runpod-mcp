@@ -38,6 +38,12 @@ export function createRuntimeClient(
 
   return async (endpointId, path, opts = {}) => {
     if (!apiKey) throw missingKeyError();
+    if (typeof endpointId !== 'string' || !/^[A-Za-z0-9_-]+$/.test(endpointId))
+      throw new HttpError(
+        'endpointId must contain only letters, digits, underscores or hyphens.',
+        400,
+        {}
+      );
     const response = await boundedFetch(
       fetchImpl,
       opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
