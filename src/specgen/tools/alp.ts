@@ -221,7 +221,7 @@ export function createAlpTools(opts: AlpToolsOptions): CuratedTool[] {
     lenientArguments: true,
     name: 'save_to_journal',
     description:
-      "Save something you learned about using Runpod that a future session would benefit from (e.g. 'image X needs CUDA 12.8', 'endpoint type cannot be changed after create'). The journal is private to this account: read_journal returns these entries to a future session on the same account and to nobody else. Runpod reviews entries in aggregate to improve the platform. Set trigger when you can — an entry with no stated trigger cannot be surfaced to the session that needs it. Never include API keys or secrets.",
+      "Save something you learned about using Runpod that a future session would benefit from (e.g. 'image X needs CUDA 12.8', 'endpoint type cannot be changed after create'). read_journal returns these entries only to sessions authenticated to this account; entries are not published to other accounts. Runpod stores and reviews submissions to improve agent workflows. Set trigger when you can — an entry with no stated trigger cannot be surfaced to the session that needs it. Never include API keys or secrets.",
     inputSchema: alpInputSchema(
       'The learning, stated so a future agent can act on it: the situation, what turned out to be true, and how you verified it.',
       {

@@ -2,15 +2,16 @@
 // Convex write boundary. This catches recognizable tokens and sensitive config
 // assignments; arbitrary unlabeled secrets cannot reliably be identified.
 //
-// Three stages, run in this order, each a pure function with its own table
+// Four stages, run in this order, each a pure function with its own table
 // of rules and its own tests:
 //
 //   A. anchored credentials  — shapes recognizable on their own (rpa_, JWT...)
 //   B. sensitive headers     — the WHOLE value of Authorization/Cookie/...
-//   C. config assignments    — `key = value` / `key: value` by key name
+//   C. URL query secrets   — api_key/token/key/secret parameters
+//   D. config assignments    — `key = value` / `key: value` by key name
 //
 // Specific before broad is the invariant. Several stage-A rules identify a
-// credential by the word in front of it (`Bearer <opaque>`), and stage C stops
+// credential by the word in front of it (`Bearer <opaque>`), and stage D stops
 // an unquoted value at the first space or semicolon — so run in the other
 // order, C consumes "Bearer", destroys the anchor, and leaves the secret in
 // plaintext looking redacted. Stage B exists because header values are
@@ -24,7 +25,7 @@ export interface ScrubResult {
 }
 
 // Bump when any stage's rules change so stored rows record which pass they got.
-export const SCRUB_VERSION = 3;
+export const SCRUB_VERSION = 4;
 
 const MARKER = /^["']?\[redacted:[a-z_]+\]["']?$/;
 
@@ -40,6 +41,8 @@ const CREDENTIAL_PATTERNS: Array<{ name: string; re: RegExp }> = [
     name: 'vendor_key',
     re: /\b(?:sk|pk|ghp|gho|phc|phx|xoxb|xoxp)[-_][A-Za-z0-9_-]{16,}\b/g,
   },
+  // Hugging Face access tokens.
+  { name: 'hugging_face', re: /\bhf_[A-Za-z0-9]{30,}\b/g },
   // AWS access key ids.
   { name: 'aws_key', re: /\bAKIA[0-9A-Z]{16}\b/g },
   // Three-segment JWTs.
@@ -89,7 +92,24 @@ export function redactHeaderValues(text: string): ScrubResult {
   return { text: out, redactions };
 }
 
-// ---- Stage C: config assignments, by key name ---------------------------
+// ---- Stage C: URL query credentials -----------------------------------
+
+// URL query credentials stop at the next query field, fragment or text boundary.
+// Preserve parameter names and non-secret query fields for diagnostics.
+export function redactQuerySecrets(text: string): ScrubResult {
+  let redactions = 0;
+  const out = text.replace(
+    /([?&](?:api[_-]?key|access[_-]?token|token|key|secret)=)([^&#\s"'<>`]+)/gi,
+    (match, prefix: string, value: string) => {
+      if (MARKER.test(value)) return match;
+      redactions++;
+      return `${prefix}[redacted:query]`;
+    }
+  );
+  return { text: out, redactions };
+}
+
+// ---- Stage D: config assignments, by key name ---------------------------
 
 // Keys are compared segment by segment, never by substring: a substring test
 // redacts `tokenizer: llama-3` because it contains "token". Split on
@@ -140,7 +160,7 @@ export function isSensitiveKey(key: string): boolean {
 // Covers JSON, YAML and shell env assignments, including quoted values with
 // spaces or escaped quotes. The field name is kept for diagnostic context.
 const ASSIGNMENT =
-  /(?<![A-Za-z0-9_.-])(["']?[A-Za-z_][A-Za-z0-9_.-]*["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;{}"']+)(?=\s|[,;}]|$)/g;
+  /(?<![A-Za-z0-9_.-])(["']?[A-Za-z_][A-Za-z0-9_.-]*["']?[ \t]*[:=][ \t]*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;{}&#"']+)(?=\s|[,;}&#]|$)/g;
 
 export function redactAssignments(text: string): ScrubResult {
   let redactions = 0;
@@ -171,6 +191,7 @@ export function scrub(text: string): ScrubResult {
   for (const stage of [
     redactAnchoredCredentials,
     redactHeaderValues,
+    redactQuerySecrets,
     redactAssignments,
   ]) {
     const result = stage(out);

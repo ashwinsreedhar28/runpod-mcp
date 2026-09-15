@@ -1,7 +1,7 @@
 > Current redaction implementation: `src/alp/scrub.ts` is shared by the
 > Vercel ingest handler and the Convex write mutation. Both apply the same
 > best-effort pass to all user-authored text, including metadata, before storage.
-> It catches known credential formats and sensitive JSON/YAML/env assignments.
+> It catches known credential formats and sensitive JSON/YAML/env assignments, Hugging Face tokens, and URL query secrets.
 > There is no separate private or authoritative scrubber; historical references
 > to one below are superseded. Unlabeled arbitrary secrets may still evade
 > detection, so agents must continue to omit credentials from submissions.
@@ -154,65 +154,27 @@ afterward, which is the cheapest proxy for "the void was not good enough."
 
 ## Ingest topology
 
-`@runpod/mcp-server` is a **public npm package**. Anything in its `files` list is
-readable by everyone who installs it, so the local stdio path cannot hold Convex
-credentials or any other shared secret. There is no version
-of "run the same store locally" that survives that constraint.
+ALP is hosted-only. The public npm package contains no storage credentials, and
+local stdio does not register ALP tools.
 
-So both transports write through one hosted endpoint on the Vercel deployment:
-
-```
-stdio (local, public npm)  ──┐
-                             ├─→ POST /api/alp/submit   (auth: caller's rp_ key)
-hosted MCP (same Vercel)  ───┘        │
-                                      ├─ resolve key -> identity
-                                      ├─ courtesy scrub (authoritative scrub is sink-side)
-                                      └─ Convex mutation    (server shared secret)
-                                              └─ scheduled ingest:
-                                                   scrub -> embed -> cluster -> classify
+```text
+Hosted MCP tool
+  -> POST /api/alp/submit (caller's Runpod API key)
+  -> resolve account identity
+  -> scrub submitted text
+  -> Convex HTTP action (server-side shared secret)
+  -> scrub again with the same rules and store
 ```
 
-stdio already holds the caller's Runpod API key, so it can authenticate to the
-ingest endpoint with a credential it already has. No new secret ships in the
-package.
-
-This also gives the single-caller property the Convex access rule above depends
-on, and it means schema changes land in one place rather than needing an npm
-release to reach local users.
+The read handler at `/api/alp/journal` resolves the caller's identity before
+querying the account-scoped journal. Neither handler accepts a caller-selected
+storage host. Embedding, clustering and public search are future work.
 
 ## Enablement and local testing
 
-### Which Convex
-
-`api/index.ts` reads the Convex URL from env, so it follows the Vercel
-environment: production deployment -> prod Convex, preview/dev -> dev Convex. The
-stdio client never knows which; it only knows the ingest URL.
-
-### The discriminator is configuration, not transport — SUPERSEDED
-
-Decision (2026-09-03): **ALP is hosted-only.** The stdio entrypoint never
-registers the tools, so `npx` users cannot enable them; only a deployment that
-configures its sink (`ALP_SINK_URL` + `ALP_SINK_SECRET`) serves them. The
-original reasoning below is kept for history — the npx-users-are-good-signal
-argument may reopen this later, and the code structure (tools gated on a
-server option) makes that a one-line change in `src/stdio.ts`.
-
-### Original reasoning (historical)
-
-Making ALP hosted-only would be a mistake. A public user running
-`npx @runpod/mcp-server` with their own key and hitting a real bug is better
-signal than hosted traffic, not worse, and they are already inside the same trust
-boundary — the package sends their API key, pod configs and endpoint definitions
-to Runpod on every call. Feedback text is consistent with that, provided it is
-disclosed and can be turned off.
-
-So enablement follows configuration:
-
-| Ingest URL                    | Behaviour                                                   |
-| ----------------------------- | ----------------------------------------------------------- |
-| default (production endpoint) | Tools active. Covers hosted and ordinary `npx` users alike. |
-| pointed at localhost          | Contributor running their own stack, below.                 |
-| explicitly off                | Tools absent — see below.                                   |
+The hosted tools appear only when `ALP_SINK_URL` and `ALP_SINK_SECRET` are set.
+Configure these for the intended production, preview or development sink; the
+application does not select a Convex deployment automatically.
 
 ### Disabled means absent, not broken
 
@@ -229,27 +191,16 @@ This falls out of the `api/` boundary with no second code path:
 ```
 vercel dev                  # serves api/index.ts on :3000, reads ALP_SINK_URL from env
 npx convex dev              # the contributor's own dev deployment
-
-RUNPOD_MCP_ALP_URL=http://localhost:3000/api/alp/submit
 ```
 
-The ingest URL env var _is_ the local-testing mechanism. Convex credentials live only in the `vercel dev` environment — which is where the
-public-repo rules already require them — so nothing secret reaches the stdio
-process.
+Connect an MCP client to the local HTTP server. ALP tools appear only when that
+server has `ALP_SINK_URL` and `ALP_SINK_SECRET` configured for your own development
+Convex deployment. The HTTP handler derives its ingest URL from the current
+request; there is no stdio ALP URL override or default production ingest URL.
+The handlers live in `src/alp/` and are mounted by `api/index.ts`.
 
-**A contributor cannot reach our Convex.** The deployment URL and shared secret
-exist only as Vercel env vars, never in the repo, so there is no configuration a
-local checkout can hold that would let it write directly to the production store.
-That is the whole point of the `api/` boundary and the no-defaults rule.
-
-Leaving the ingest URL at its default therefore does not "pollute production" — it
-submits through the public authenticated endpoint as that person's own identity,
-rate-limited, exactly like any `npx` user. Because the submission carries an
-identity, internal orgs can be tagged and excluded from dashboards and clusters,
-which is a real control rather than a documentation plea.
-
-Pointing at a local stack is still the better loop while iterating, since you can
-read your own rows back immediately.
+Use the development sink when testing writes. The application does not enforce
+ALP rate limits; optional deployment WAF rules are described under Rate limiting.
 
 ## Identity
 
@@ -467,42 +418,25 @@ What remains public is fine: rate-limit logic (quotas are not secrets, and knowi
 them does not help evade a per-identity limit) and identity resolution, which is
 already public in this repo today.
 
-### Rule 1 — no private-infra values outside the deployment env
+### Rule 1 — storage credentials stay in the deployment environment
 
-Not "no secrets in `src/`" — no infrastructure surface at all. A new `api/alp/`
-module tree, imported only by `api/index.ts`. The npm bundle should contain no
-evidence that the private sink exists.
+`src/alp/ingest.ts` and `src/alp/read.ts` implement the HTTP handlers mounted by
+`api/index.ts`. They read the storage URL and shared secret from the server's
+environment. The tool clients know only the authenticated HTTP endpoint URL;
+they never receive storage credentials. The scrubber and Convex schema are public
+source in this repository.
 
-This is stricter than it needs to be for secrecy alone, and worth it because it
-makes the boundary structural instead of a habit: a contributor cannot
-accidentally publish the ingest internals by importing them from a tool file,
-because the tool files cannot see them.
+### Rule 2 — no defaults for storage credentials
 
-The tools in `src/` only ever know one thing: the ingest endpoint URL.
+| Value | Source |
+| --- | --- |
+| ALP ingest URL | Derived from the current hosted request by `src/http.ts` |
+| Convex deployment URL | `ALP_SINK_URL`, no fallback |
+| Convex shared secret | `ALP_SINK_SECRET`, no fallback |
 
-### Rule 2 — defaults for public endpoints, never for private infra
-
-The repo already draws this line correctly. `src/_shared/backend.ts` hardcodes
-fallbacks for public product hosts (`rest.runpod.io/v1`, `api.runpod.io/v2`,
-`api.runpod.io/graphql`), and `src/install/clients.ts` does the same for
-`mcp.getrunpod.io`. Those are public endpoints; publishing them leaks nothing.
-
-Follow it:
-
-| Value                 | Default                                                                      | Lives in |
-| --------------------- | ---------------------------------------------------------------------------- | -------- |
-| ALP ingest URL        | yes — a public endpoint on a Runpod domain, same class as `mcp.getrunpod.io` | `src/`   |
-| Convex deployment URL | **none**                                                                     | `api/`   |
-| Convex shared secret  | **none**                                                                     | `api/`   |
-
-The ingest URL needs a default, or stdio users get no ALP unless they configure
-one, which nobody will. That is acceptable precisely because it is an
-authenticated, rate-limited public endpoint — the same thing every other Runpod
-API host in this table already is.
-
-Everything in the "none" rows is `process.env.X` with no `??` fallback. A missing
-value disables the feature; it never
-falls back to a guessed URL.
+Missing sink configuration disables the hosted tools. Local stdio never registers
+them. Authentication is implemented by the application; rate limiting depends on
+optional deployment WAF configuration and must not be assumed to be active.
 
 ### Rule 3 — never echo infrastructure back to the agent
 
