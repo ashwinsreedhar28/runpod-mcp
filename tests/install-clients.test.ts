@@ -1786,11 +1786,11 @@ describe('verifyApiKey deadline', () => {
       );
       const address = server.address();
       assert.ok(address && typeof address === 'object');
-      const previous = process.env.RUNPOD_REST_API_URL;
-      process.env.RUNPOD_REST_API_URL = `http://127.0.0.1:${address.port}/v1`;
+      const previous = process.env.RUNPOD_API_BASE_URL;
+      process.env.RUNPOD_API_BASE_URL = `http://127.0.0.1:${address.port}`;
       t.after(async () => {
-        if (previous === undefined) delete process.env.RUNPOD_REST_API_URL;
-        else process.env.RUNPOD_REST_API_URL = previous;
+        if (previous === undefined) delete process.env.RUNPOD_API_BASE_URL;
+        else process.env.RUNPOD_API_BASE_URL = previous;
         for (const res of stalled) res.destroy();
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve()))
@@ -1807,4 +1807,22 @@ describe('verifyApiKey deadline', () => {
       );
     }
   );
+});
+
+it('wizard key verification uses the configured REST v2 host and Bearer header', async (t) => {
+  const previous = process.env.RUNPOD_API_BASE_URL;
+  process.env.RUNPOD_API_BASE_URL = ' https://dev.example/ ';
+  t.after(() => {
+    if (previous === undefined) delete process.env.RUNPOD_API_BASE_URL;
+    else process.env.RUNPOD_API_BASE_URL = previous;
+  });
+  t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+    assert.equal(url, 'https://dev.example/v2/pods');
+    assert.equal(
+      new Headers(init.headers).get('authorization'),
+      'Bearer test-key'
+    );
+    return new Response('[]');
+  });
+  assert.equal(await verifyApiKey('test-key'), true);
 });

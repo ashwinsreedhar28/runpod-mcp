@@ -13,7 +13,6 @@ resources. The only intended difference is wait budgets: 45 s hosted
 
 ```
 specgen/spec/openapi.yaml       vendored v2 OpenAPI document (production generation)
-specgen/scripts/fix_spec.py     spec patch layer, run over every fresh pull
 specgen/generator-config.yaml   exclusions / renames / description overrides
 specgen/generator/              the generator (pnpm generate:tools)
 specgen/skills/                 the ten journey skills, served as MCP resources
@@ -44,8 +43,7 @@ pnpm generate:skills   # re-embed specgen/skills into skills.gen.ts
 pnpm test              # includes the specgen drift gates
 ```
 
-New API endpoint: pull the spec, run the patch layer
-(`python3 specgen/scripts/fix_spec.py specgen/spec/openapi.yaml`), then
+New API endpoint: pull the unmodified production spec, then
 `pnpm generate:tools`. The gates fail if an operation is neither generated nor
 excluded with a reason, if a curated replacement disappears, or if the old
 54-tool surface loses a mapping.
