@@ -25,7 +25,7 @@ export interface ScrubResult {
 }
 
 // Bump when any stage's rules change so stored rows record which pass they got.
-export const SCRUB_VERSION = 4;
+export const SCRUB_VERSION = 5;
 
 const MARKER = /^["']?\[redacted:[a-z_]+\]["']?$/;
 
@@ -159,27 +159,200 @@ export function isSensitiveKey(key: string): boolean {
 
 // Covers JSON, YAML and shell env assignments, including quoted values with
 // spaces or escaped quotes. The field name is kept for diagnostic context.
-const ASSIGNMENT =
-  /(?<![A-Za-z0-9_.-])(["']?[A-Za-z_][A-Za-z0-9_.-]*["']?[ \t]*[:=][ \t]*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;{}&#"']+)(?=\s|[,;}&#]|$)/g;
+//
+// This was one regex with a lookbehind, two quoted-string alternatives, a
+// negated value class and a trailing lookahead. It was unreadable, and every
+// fix to one case broke another: excluding `&` from the value class so a URL's
+// second query parameter survived also truncated `password: p&ss#word123` at
+// the `&` and leaked the rest. Both behaviors were correct for their own
+// input and the character class had no way to tell the two apart, because the
+// distinction is context, not characters.
+//
+// So the scan is written out: a cursor, one small function per token, and the
+// value's terminator set chosen from where the key sits. Each rule below is a
+// named predicate that can be read and tested on its own.
+
+const QUOTES = new Set(['"', "'"]);
+
+// A value always ends at one of these: `{`/`}` and `,`/`;` close a JSON or
+// inline-YAML member, and a quote cannot appear inside an unquoted value.
+const VALUE_TERMINATORS = new Set([',', ';', '{', '}', '"', "'"]);
+
+// `&` and `#` end a value ONLY inside a URL query, where they begin the next
+// parameter and the fragment. In a config file they are ordinary password
+// characters — `p&ss#word` is one value, not three.
+const QUERY_TERMINATORS = new Set(['&', '#']);
+
+function isAsciiLetter(ch: string): boolean {
+  return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+}
+
+function isAsciiDigit(ch: string): boolean {
+  return ch >= '0' && ch <= '9';
+}
+
+/** A key begins with a letter or underscore, never a digit — so `10:30` in a
+ *  timestamp is not read as an assignment. */
+function isKeyStart(ch: string): boolean {
+  return isAsciiLetter(ch) || ch === '_';
+}
+
+/** Inside a key name: adds digits and the three separators that `splitKey`
+ *  later splits on, so `aws.secretKey` and `DB_PASSWORD` arrive whole. */
+function isKeyBody(ch: string): boolean {
+  return (
+    isAsciiLetter(ch) ||
+    isAsciiDigit(ch) ||
+    ch === '_' ||
+    ch === '.' ||
+    ch === '-'
+  );
+}
+
+/** Horizontal space only. A newline after the separator means the value is on
+ *  another line, so `db:\n  password: x` must not read `password` as db's
+ *  value — the bug that let nested YAML through entirely. */
+function isSpaceOrTab(ch: string): boolean {
+  return ch === ' ' || ch === '\t';
+}
+
+function isWhitespace(ch: string): boolean {
+  return (
+    ch === ' ' ||
+    ch === '\t' ||
+    ch === '\n' ||
+    ch === '\r' ||
+    ch === '\f' ||
+    ch === '\v'
+  );
+}
+
+interface Assignment {
+  /** Bare key name: quotes and the separator stripped. */
+  key: string;
+  /** Raw value text as it appears, including its quotes when quoted. */
+  raw: string;
+  /** Quote character to reinstate around a replacement, or `''`. */
+  quote: string;
+  /** Half-open range of the value within the source text. */
+  start: number;
+  end: number;
+}
+
+/** Reads a quoted value, honoring backslash escapes. An unterminated quote is
+ *  a truncated paste, so it reads to the end of the line rather than giving
+ *  up: for a redactor, over-reading a secret is the safe direction. */
+function readQuotedValue(text: string, start: number): number {
+  const quote = text[start];
+  let i = start + 1;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\') {
+      i += 2;
+      continue;
+    }
+    if (ch === quote) return i + 1;
+    if (ch === '\n' || ch === '\r') return i;
+    i++;
+  }
+  return text.length;
+}
+
+/** Reads an unquoted value up to the first terminator for its context. */
+function readUnquotedValue(
+  text: string,
+  start: number,
+  inQueryString: boolean
+): number {
+  let i = start;
+  while (i < text.length) {
+    const ch = text[i];
+    if (isWhitespace(ch) || VALUE_TERMINATORS.has(ch)) break;
+    if (inQueryString && QUERY_TERMINATORS.has(ch)) break;
+    i++;
+  }
+  return i;
+}
+
+/** Parses `key: value` or `key = value` beginning at `at`, or null if there is
+ *  no assignment there. */
+function parseAssignment(text: string, at: number): Assignment | null {
+  const before = at > 0 ? text[at - 1] : '';
+  // Mid-identifier: `my_password` must not also match as key `password`.
+  if (isKeyBody(before)) return null;
+
+  let i = at;
+  const openingQuote = QUOTES.has(text[i] ?? '') ? text[i] : '';
+  if (openingQuote) i++;
+  if (!isKeyStart(text[i] ?? '')) return null;
+
+  const keyStart = i;
+  while (i < text.length && isKeyBody(text[i])) i++;
+  const key = text.slice(keyStart, i);
+
+  // A closing quote is tolerated whether or not one opened: pasted snippets
+  // arrive truncated, and `password": x` should still redact.
+  if (QUOTES.has(text[i] ?? '')) i++;
+
+  while (i < text.length && isSpaceOrTab(text[i])) i++;
+  if (text[i] !== ':' && text[i] !== '=') return null;
+  i++;
+  while (i < text.length && isSpaceOrTab(text[i])) i++;
+
+  // `?api_key=` or `&token=` — this key sits in a URL query string.
+  const inQueryString = before === '?' || before === '&';
+
+  const start = i;
+  let end: number;
+  let quote = '';
+  if (QUOTES.has(text[start] ?? '')) {
+    quote = text[start];
+    end = readQuotedValue(text, start);
+  } else {
+    end = readUnquotedValue(text, start, inQueryString);
+  }
+  // A parent key such as `db:` has no value of its own.
+  if (end === start) return null;
+
+  return { key, raw: text.slice(start, end), quote, start, end };
+}
 
 export function redactAssignments(text: string): ScrubResult {
   let redactions = 0;
-  const out = text.replace(
-    ASSIGNMENT,
-    (match, prefix: string, value: string) => {
-      const key = prefix.replace(/["'\s:=]/g, '');
-      if (!isSensitiveKey(key)) return match;
-      // Already handled by an earlier stage — do not count it twice.
-      if (MARKER.test(value)) return match;
-      redactions++;
-      const quote = value.startsWith('"')
-        ? '"'
-        : value.startsWith("'")
-          ? "'"
-          : '';
-      return `${prefix}${quote}[redacted:config]${quote}`;
+  let out = '';
+  let copiedTo = 0;
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const found = parseAssignment(text, cursor);
+    if (!found) {
+      cursor++;
+      continue;
     }
-  );
+
+    // Already handled by an earlier stage — keep its marker, do not count it
+    // twice, and resume past it.
+    if (MARKER.test(found.raw)) {
+      cursor = found.end;
+      continue;
+    }
+
+    if (!isSensitiveKey(found.key)) {
+      // Resume INSIDE the value, not after it. A non-sensitive assignment can
+      // contain one: `https://h/?password=x` parses as key `https` whose value
+      // is the whole URL, and skipping it leaked the password outright.
+      cursor = found.start;
+      continue;
+    }
+
+    out += text.slice(copiedTo, found.start);
+    out += `${found.quote}[redacted:config]${found.quote}`;
+    copiedTo = found.end;
+    cursor = found.end;
+    redactions++;
+  }
+
+  out += text.slice(copiedTo);
   return { text: out, redactions };
 }
 
