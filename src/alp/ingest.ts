@@ -1,13 +1,12 @@
 // ALP ingest endpoint: POST /api/alp/submit (see docs/agent-learning-protocol.md).
 //
-// The ONE write path for all three ALP routes on BOTH transports — the npm
-// package cannot hold storage credentials, so local stdio and the hosted
-// server alike submit here, authenticated with the caller's own Runpod key.
+// The shared write path for the three hosted ALP submission tools.
+// Local stdio does not register these tools.
 //
 // Behavior per request: authenticate → resolve the durable identity (never
 // key on the API key; see the design doc) → courtesy scrub → forward to the
 // private sink with the shared server secret. The sink (a Convex HTTP action
-// in a private repo) owns storage, the authoritative scrub, and everything
+// in convex/ in this repo) owns storage, the authoritative scrub, and everything
 // downstream. When no sink is configured this endpoint answers honestly that
 // nothing was recorded — it never pretends.
 //
@@ -168,7 +167,8 @@ export async function handleAlpSubmit(
       ? (body.severity as AlpSeverity)
       : undefined,
     tool: typeof body.tool === 'string' ? body.tool : undefined,
-    workaround: typeof body.workaround === 'string' ? body.workaround : undefined,
+    workaround:
+      typeof body.workaround === 'string' ? body.workaround : undefined,
     trigger: typeof body.trigger === 'string' ? body.trigger : undefined,
     harness: typeof body.harness === 'string' ? body.harness : undefined,
     harnessSource:

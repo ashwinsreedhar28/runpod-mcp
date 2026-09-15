@@ -28,8 +28,8 @@ importers:
         specifier: ^2.29.6
         version: 2.29.7(@types/node@20.19.24)
       '@runpod/typescript-api-sdk':
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: 0.1.1
+        version: 0.1.1
       '@types/node':
         specifier: ^20.10.5
         version: 20.19.24
@@ -732,8 +732,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@runpod/typescript-api-sdk@0.1.0':
-    resolution: {integrity: sha512-gff27/qkq6pFhZKgqn/t0W7TJJSD2z/IW+9Ue9N4dwAYVdPgGtMFKqDTBbGtpWFH9j6iq4SH/rabvdCeVLTJNw==}
+  '@runpod/typescript-api-sdk@0.1.1':
+    resolution: {integrity: sha512-H3O++lmXmJ6jyV6dQ7cl8fTI4EYVYg92zF0s/VpGEC/yi0wsIpdFjPjTz+GPokywY9NBrd84TOeuhYXhIqh3AQ==}
     engines: {node: '>=20'}
 
   '@ts-morph/common@0.11.1':
@@ -2809,7 +2809,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.52.5':
     optional: true
 
-  '@runpod/typescript-api-sdk@0.1.0':
+  '@runpod/typescript-api-sdk@0.1.1':
     dependencies:
       openapi-fetch: 0.17.0
       structured-headers: 2.1.0

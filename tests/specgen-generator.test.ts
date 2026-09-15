@@ -173,3 +173,38 @@ test('ambiguous flattened parameters fail generation instead of silently overwri
     /Ambiguous parameter id/
   );
 });
+
+test('generation rejects stale exclusions and skips only known operations', () => {
+  const spec = bodySpec({ type: 'object' });
+  assert.throws(
+    () =>
+      generateTools(spec, {
+        exclude: { oldCreateName: { reason: 'curated' } },
+      }),
+    /Excluded operations missing from spec: oldCreateName/
+  );
+  assert.deepEqual(
+    generateTools(spec, {
+      exclude: {
+        createExample: { reason: 'curated', replacedBy: 'create-example' },
+      },
+    }),
+    []
+  );
+});
+
+test('unsupported parameter locations fail unless their operation is excluded', () => {
+  for (const location of ['header', 'cookie']) {
+    const spec = bodySpec({ type: 'object' });
+    spec.paths['/v2/example'].post!.parameters = [
+      { name: 'session', in: location, schema: { type: 'string' } },
+    ];
+    assert.throws(() => generateTools(spec), /Unsupported parameter location/);
+    assert.deepEqual(
+      generateTools(spec, {
+        exclude: { createExample: { reason: 'curated transport' } },
+      }),
+      []
+    );
+  }
+});

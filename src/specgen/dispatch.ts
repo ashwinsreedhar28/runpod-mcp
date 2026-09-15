@@ -46,7 +46,9 @@ export function validateArguments(
   args: Record<string, unknown>
 ): ToolResult | null {
   const required = (inputSchema.required ?? []) as string[];
-  const missing = required.filter((name) => args[name] === undefined);
+  const missing = required.filter(
+    (name) => args[name] === undefined || args[name] === null
+  );
   if (missing.length) {
     return {
       ok: false,

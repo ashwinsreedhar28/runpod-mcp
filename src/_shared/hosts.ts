@@ -1,7 +1,6 @@
 // Env-resolved API base URLs, extracted from the retired dual-version backend
 // resolver (backend.ts) when the spec-generated surface became the only one.
-// The credential pre-flight's wrong-environment guard (src/http.ts) still
-// compares these to their defaults, so they live on independently of any tool.
+// The credential preflight compares only active SDK and runtime destinations.
 
 export type Env = Record<string, string | undefined>;
 
@@ -13,15 +12,7 @@ function pick(value: string | undefined, fallback: string): string {
   return value?.trim().replace(/\/+$/, '') || fallback;
 }
 
-export function restV1Base(env: Env): string {
-  return pick(env.RUNPOD_REST_API_URL, 'https://rest.runpod.io/v1');
-}
-export function restV2Base(env: Env): string {
-  return pick(env.RUNPOD_REST_V2_API_URL, 'https://api.runpod.io/v2');
-}
-// The env var the specgen SDK actually reads for its base URL (no /v2 —
-// the generated paths carry it). Watched by the wrong-environment guard
-// alongside the legacy spellings above.
+// Generated paths include /v2, so the SDK base is the API origin.
 export function sdkBase(env: Env): string {
   return pick(env.RUNPOD_API_BASE_URL, 'https://api.runpod.io');
 }

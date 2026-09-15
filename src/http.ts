@@ -9,8 +9,6 @@ import {
   type CredentialCheckerHandle,
 } from './_shared/credential-check.js';
 import {
-  restV1Base,
-  restV2Base,
   sdkBase,
   serverlessBase,
   authedGraphqlBase,
@@ -146,8 +144,6 @@ function credentialCheckMayBeWrongEnvironment(env = process.env): boolean {
     Object.entries(env).filter(([, v]) => v !== '')
   ) as Record<string, string | undefined>;
   const restMoved =
-    !sameHost(restV1Base(envWithoutEmpties), restV1Base({})) ||
-    !sameHost(restV2Base(envWithoutEmpties), restV2Base({})) ||
     !sameHost(sdkBase(envWithoutEmpties), sdkBase({})) ||
     !sameHost(serverlessBase(envWithoutEmpties), serverlessBase({}));
   const graphqlMoved = !sameHost(

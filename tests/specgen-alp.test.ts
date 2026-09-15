@@ -57,6 +57,11 @@ test('configured means present: the four ALP tools appear, with honest wording',
   assert.match(ask.description ?? '', /NO ANSWER WILL COME BACK/);
   const journal = tools.find((t) => t.name === 'save_to_journal')!;
   assert.match(journal.description ?? '', /read_journal returns these entries/);
+  assert.match(journal.description ?? '', /not published to other accounts/);
+  assert.match(
+    journal.description ?? '',
+    /Runpod stores and reviews submissions/
+  );
   const read = tools.find((t) => t.name === 'read_journal')!;
   assert.match(read.description ?? '', /cannot read any other account/);
   assert.deepEqual(Object.keys(read.inputSchema.properties ?? {}), ['limit']);
@@ -835,4 +840,38 @@ test('read_journal tool fails soft when the read endpoint is unreachable', async
   assert.deepEqual(payload.entries, []);
   assert.match(payload.note, /Do not retry/);
   await client.close();
+});
+
+test('scrub catches nested YAML and Compose assignments without consuming child keys', () => {
+  for (const text of [
+    'db:\n  password: hunter2hunter2',
+    'environment:\n  RUNPOD_API_KEY: abcdef1234567890abcdef',
+    'services:\n  app:\n    environment:\n      - HF_TOKEN=opaque-secret-value',
+  ]) {
+    const result = scrub(text);
+    assert.equal(result.redactions, 1);
+    assert.doesNotMatch(
+      result.text,
+      /hunter2hunter2|abcdef1234567890abcdef|opaque-secret-value/
+    );
+    assert.equal(scrub(result.text).redactions, 0);
+  }
+  assert.equal(scrub('db:\n  host: localhost').text, 'db:\n  host: localhost');
+});
+
+test('scrub catches Hugging Face tokens and URL query secrets idempotently', () => {
+  const hf = 'hf_' + 'a'.repeat(34);
+  assert.equal(
+    scrub(`failed with ${hf}`).text,
+    'failed with [redacted:hugging_face]'
+  );
+  const url =
+    'https://example.test/path?api_key=short&token=a%2Fb&key=private&secret=hidden&mode=fast#section';
+  const result = scrub(url);
+  assert.equal(
+    result.text,
+    'https://example.test/path?api_key=[redacted:query]&token=[redacted:query]&key=[redacted:query]&secret=[redacted:query]&mode=fast#section'
+  );
+  assert.equal(result.redactions, 4);
+  assert.deepEqual(scrub(result.text), { text: result.text, redactions: 0 });
 });
