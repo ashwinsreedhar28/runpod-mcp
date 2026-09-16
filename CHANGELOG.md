@@ -1,5 +1,29 @@
 # @runpod/mcp-server
 
+## 4.0.0
+
+### Major Changes
+
+- 57b3973: Require Node.js 20 or newer and add the published Runpod TypeScript API SDK as the REST client foundation. Share deadline enforcement across REST, runtime, GraphQL, and log readers; preserve per-caller credentials and bounded polling. Update GPU selection with a sparse REST PATCH and isolate queued-job diagnostics by caller.
+
+  Pin the bundled TypeScript API SDK to 0.1.1. Reject null required arguments and invalid endpoint IDs before issuing requests.
+
+- 57b3973: Serve the same REST v2 generated tools and skill resources over HTTP and stdio. Remove the legacy v1 fallback, hand-written tool surface, and package tools export. See specgen/old-mcp-tools.yaml for renamed tools and pod-action replacements. Include argument checks, compact lists, bounded log snapshots, upstream retry guidance, caller tracking, and opt-in hosted analytics. The REST SDK is bundled into both entrypoints.
+
+  Remove the repository Dockerfile, Smithery manifest/install instructions, and bundled Cursor configuration. Use the hosted MCP URL or the published npm CLI, configured in your MCP client, instead. The install wizard verifies keys against REST v2 and honors RUNPOD_API_BASE_URL; retired REST host variables no longer disable credential preflight.
+
+### Minor Changes
+
+- 57b3973: Add hosted-only feedback, question, and private journal tools when a storage sink is configured. Contributions are optional and scrubbed for secrets. Scope journal reads to the authenticated account, bound reads, verify storage confirmation, and reject malformed storage requests. Local stdio does not advertise these tools.
+
+  Redact nested YAML/Compose secrets, Hugging Face tokens, and URL query credentials. Clarify that journals are not published to other accounts and Runpod stores submissions for review.
+
+### Patch Changes
+
+- 57b3973: Fix two secret-redaction leaks in ALP submission scrubbing, and replace the config-assignment regex with an explicit scan.
+
+  `password: p&ss#word123` and `password=abc&def` were truncated at the `&` and everything after it was stored in plaintext. A sensitive assignment nested inside a non-sensitive value was skipped entirely, so `https://host/?password=secret` passed through untouched. Values now keep `&` and `#` unless the key sits in a URL query string, where those characters really do bound the value, and the scan resumes inside a non-sensitive value instead of past it. Unbalanced and unterminated quotes no longer disable redaction. Scrub version is now 5.
+
 ## 3.4.0
 
 ### Minor Changes
