@@ -1,10 +1,8 @@
 // Operational seam for the hosted path: per-tool-call structured logging and
-// the rate-limit gate. The gate defines a seat in the request path (keyed on
-// a caller identity, consulted before any tool work) and, when a counter
-// store is configured, enforces a fixed-window limit through it. With no
-// store configured it stays the always-admit no-op, so a deployment opts in
-// by setting environment variables (rateLimiterFromEnv) — the dispatch
-// pipeline is untouched either way.
+// the rate-limit gate. The gate is a seat in the request path (keyed on a
+// caller identity, consulted before any tool work): it enforces a fixed
+// window through a counter store when one is configured and admits
+// everything otherwise, so a deployment opts in by environment variable.
 //
 // SECURITY: nothing in this file may log the API key, the Authorization
 // header, or tool arguments (which can carry payload secrets). Callers are
@@ -14,17 +12,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Env } from '../_shared/hosts.js';
 
-// Caller-id salt. Per process by default: ids correlate within an instance's
-// log window but cannot be joined across instances or replayed offline
-// against a key list. A shared rate-limit store needs the opposite — every
-// instance must hash the same token to the same id, or each instance counts
-// the caller under its own key and the limit silently becomes per-instance.
-// The store's token is a deployment-wide secret present exactly when the
-// store is, so it doubles as the salt (analytics.ts makes the same fallback
-// to the PostHog key). Rotating that token then changes every caller id at
-// once: in-flight counters restart and log lines cannot be correlated across
-// the rotation. Production should set MCP_CALLER_SALT explicitly so the salt
-// and the store credential rotate independently.
+// Caller-id salt. Per process by default, so ids correlate within one
+// instance's logs but cannot be joined across instances or replayed against
+// a key list. A shared rate-limit store needs the opposite — every instance
+// must hash a token to the same id — so the store's token doubles as the
+// salt when set (analytics.ts makes the same fallback to the PostHog key).
+// Rotating it then changes every caller id at once; production should set
+// MCP_CALLER_SALT so the salt and the credential rotate independently.
 const SALT =
   process.env.MCP_CALLER_SALT ||
   process.env.UPSTASH_REDIS_REST_TOKEN ||
@@ -56,19 +50,16 @@ export type RateLimiter = (
 // existing deployment is unchanged until it opts in.
 export const noopRateLimiter: RateLimiter = async () => ({ allowed: true });
 
-// The one operation a counter backend must provide. `incr` bumps the count
-// under `key`, sets the key to expire `windowS` seconds after its FIRST
-// increment, and returns the new count. Keys already name their window (see
-// createRateLimiter), so expiry is garbage collection, not the window edge.
+// The one operation a counter backend must provide: bump `key`, set it to
+// expire `windowS` seconds after its FIRST increment, return the new count.
+// Keys already name their window, so expiry is garbage collection only.
 export interface RateLimitStore {
   incr(key: string, windowS: number): Promise<number>;
 }
 
-// In-process store for tests and local development only. It is per process,
-// so on a multi-instance deployment every instance would keep its own
-// counter — the hosted path never selects it (see rateLimiterFromEnv).
-// Expired entries are pruned on each access, so the map stays bounded by the
-// callers seen within one window.
+// For tests and local development only: per process, so on a multi-instance
+// deployment each instance would count alone. The hosted path never selects
+// it. Expired entries are pruned on each access, which bounds the map.
 export function createMemoryStore(
   now: () => number = Date.now
 ): RateLimitStore {
@@ -95,13 +86,11 @@ export function createMemoryStore(
 const UPSTASH_TIMEOUT_MS = 2_000;
 
 // Upstash Redis over its REST API, through the global fetch so no dependency
-// is added. One pipeline round trip per call: INCR, then EXPIRE with NX so
-// only the first increment sets the TTL (Redis >= 7.0 syntax; Upstash tracks
-// 8.x). The pipeline is not atomic, and a per-command EXPIRE error is not
-// surfaced: a key whose EXPIRE fails has no TTL and lives forever. Every
-// later call in the same window retries EXPIRE NX, so a key is orphaned only
-// if EVERY call's EXPIRE fails — unlikely, and the cost is one stale key per
-// caller-window, never a wrong verdict.
+// is added. One pipeline per call: INCR, then EXPIRE NX so only the first
+// increment sets the TTL. The pipeline is not atomic and an EXPIRE error is
+// not surfaced, so a key whose EXPIRE fails keeps no TTL; every later call in
+// the window retries it, so a key is orphaned only if every attempt fails —
+// one stale key, never a wrong verdict.
 // https://upstash.com/docs/redis/features/restapi
 export function createUpstashStore(opts: {
   url: string;
@@ -146,17 +135,13 @@ export interface RateLimitOptions {
   now?: () => number;
 }
 
-// Fixed-window counter. The key names the caller and the window it falls in,
-// so a new window starts from zero with no reset step, and a denied caller is
-// told how much of the window is left. Wall-clock time on purpose (unlike
-// the monotonic clock in credential-check.ts): every instance sharing the
-// store must agree on where a window starts.
-//
-// Fails OPEN: if the store throws, the call is admitted and one line is
-// logged. A limiter outage must not become a tool outage — the WAF still
-// bounds unauthenticated traffic and the upstream API keeps its own quotas.
-// The line carries the caller hash and tool, never the store key or the
-// error text (a fetch failure message can name the store host).
+// Fixed-window counter. The key names the caller and the window, so a new
+// window starts from zero with no reset step and a denied caller learns how
+// much of the window is left. Wall-clock on purpose (credential-check.ts is
+// monotonic): every instance sharing the store must agree where a window
+// starts. Fails OPEN — a store error admits the call and logs one line with
+// the caller hash and tool, never the key or the error text (which can name
+// the store host). A limiter outage must not become a tool outage.
 export function createRateLimiter(
   store: RateLimitStore,
   opts: RateLimitOptions
