@@ -1,6 +1,7 @@
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createSpecgenServer } from './specgen/server.js';
 import { createToolContext as createSpecgenContext } from './specgen/context.js';
+import { rateLimiterFromEnv } from './specgen/ops.js';
 import { SERVER_VERSION } from './server.js';
 import { sanitizeUaToken } from './_shared/tracking.js';
 import {
@@ -424,6 +425,12 @@ export async function handleMcpRequest(
     }),
     opts.serverVersion ?? SERVER_VERSION,
     {
+      // Per-caller rate limiting: enforced only when this deployment
+      // configures a counter store (UPSTASH_REDIS_REST_URL +
+      // UPSTASH_REDIS_REST_TOKEN); otherwise the always-admit default, so an
+      // unconfigured deployment behaves exactly as before. Read per request
+      // like the ALP gate below — no limiter state lives at module scope.
+      rateLimiter: rateLimiterFromEnv(),
       // Anonymous usage analytics: hosted-only, no-op unless POSTHOG_API_KEY
       // is set on the deployment, and any client can opt out per request
       // with the X-Runpod-Analytics: off header.

@@ -20,7 +20,7 @@ specgen/old-mcp-tools.yaml      54-tool parity manifest vs. the old surface
 src/specgen/generated/          machine-written output — never hand-edited
 src/specgen/tools/              curated overlay (runtime plane, GraphQL, SSE,
                                 trimmed list views)
-src/specgen/ops.ts              tool-call logging + the rate-limit stub seam
+src/specgen/ops.ts              tool-call logging + the rate-limit gate
 ```
 
 ## REST client dependency
@@ -62,5 +62,6 @@ installs can still copy `specgen/skills/` into an agent's skills directory.
 - Server-side waits clamp to 45 s behind the 60 s gateway deadline (stdio
   keeps 5-minute budgets); tool descriptions state the real ceiling.
 - One structured log line per tool call (tool, salted caller hash, status,
-  latency — never the key or arguments); rate limiting is a no-op stub with
-  the enforcement seat already in the request path (`src/specgen/ops.ts`).
+  latency — never the key or arguments); per-caller rate limiting sits in
+  the same seat (`src/specgen/ops.ts`), enforced through Upstash when the
+  deployment configures it and a no-op otherwise.

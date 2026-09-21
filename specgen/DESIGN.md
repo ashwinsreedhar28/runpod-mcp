@@ -72,7 +72,8 @@ env key instead of a bearer token). Every request is independent:
      (src/http.ts, the createSpecgenServer call)
 
 3. BOX 2 (src/specgen/server.ts)
-   - rate-limit seat: currently always admits (stub)
+   - over the per-caller limit? → retryable tool error with a wait, stop
+     (enforced only when a KV store is configured; admits otherwise)
    - looks the tool up by name:
        hand-written tool?  → run its own handler function
        generated tool?     → go to the shared executor (dispatch.ts)
@@ -223,9 +224,12 @@ disagree.
   same limit on GETs, and runs the OWASP managed rules in log mode. That
   config is project-scoped, so it covers previews and prod alike — it is
   not in git; see the project's Firewall tab. Authenticated per-caller
-  limiting is the stub: `src/specgen/ops.ts` defines the seat (consulted
-  before every call, denial → retryable error with a wait hint);
-  enforcement is a later one-function swap to a KV-backed counter.
+  limiting is the seat in `src/specgen/ops.ts`, consulted before every
+  call by `src/specgen/server.ts`, which turns a denial into a retryable
+  tool error with a wait hint. It enforces a fixed-window count per caller
+  when the deployment configures an Upstash store (`UPSTASH_REDIS_REST_URL`
+  + `UPSTASH_REDIS_REST_TOKEN`; limit from `RATE_LIMIT_PER_MIN`), admits
+  everything otherwise, and fails open on a store outage.
 - **The SDK comes from npm.** `@runpod/typescript-api-sdk` is a build
   dependency bundled into both entrypoints. It owns management API retries,
   request deadlines, and SSE parsing; MCP retains snapshot limits and
@@ -247,7 +251,7 @@ src/specgen/server.ts            Box 2: tool list, routing, resources,
 src/specgen/dispatch.ts          Box 2: the one executor for generated tools
 src/specgen/context.ts           Box 2: per-request clients from the caller's key
 src/specgen/tools/               Box 2: the 17 hand-written tools
-src/specgen/ops.ts               Box 2: log line + rate-limit stub
+src/specgen/ops.ts               Box 2: log line + rate-limit gate
 src/specgen/generated/           Box 2: machine-written output (DO NOT EDIT)
 specgen/spec/openapi.yaml        Box 3: vendored production spec
 specgen/generator-config.yaml    Box 3: exclusions / description overrides
