@@ -73,7 +73,7 @@ env key instead of a bearer token). Every request is independent:
 
 3. BOX 2 (src/specgen/server.ts)
    - over the per-caller limit? → retryable tool error with a wait, stop
-     (enforced only when a KV store is configured; admits otherwise)
+     (only when MCP_RATE_LIMIT_PER_MIN opts in; admits otherwise)
    - looks the tool up by name:
        hand-written tool?  → run its own handler function
        generated tool?     → go to the shared executor (dispatch.ts)
@@ -226,10 +226,10 @@ disagree.
   not in git; see the project's Firewall tab. Authenticated per-caller
   limiting is the seat in `src/specgen/ops.ts`, consulted before every
   call by `src/specgen/server.ts`, which turns a denial into a retryable
-  tool error with a wait hint. It enforces a fixed-window count per caller
-  when the deployment configures an Upstash store (`UPSTASH_REDIS_REST_URL`
-  + `UPSTASH_REDIS_REST_TOKEN`; limit from `RATE_LIMIT_PER_MIN`), admits
-  everything otherwise, and fails open on a store outage.
+  tool error with a wait hint. It enforces a fixed-window count per
+  credential when the deployment opts in (`MCP_RATE_LIMIT_PER_MIN` plus
+  `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`), admits everything
+  otherwise, and fails open on a store outage.
 - **The SDK comes from npm.** `@runpod/typescript-api-sdk` is a build
   dependency bundled into both entrypoints. It owns management API retries,
   request deadlines, and SSE parsing; MCP retains snapshot limits and

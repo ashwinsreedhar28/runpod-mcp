@@ -208,8 +208,9 @@ export function createSpecgenServer(
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
 
-    // Rate-limit seat: consulted before any tool work. The stub always admits;
-    // a denial comes back as a retryable tool error, not a protocol failure.
+    // Rate-limit seat: consulted before any tool work (the default limiter
+    // always admits); a denial is a retryable tool error, not a protocol
+    // failure.
     const startedAt = Date.now();
     const verdict = await rateLimiter(caller, request.params.name);
     if (!verdict.allowed) {

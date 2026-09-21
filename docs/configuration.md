@@ -17,6 +17,19 @@ ALP (Agent Learning Protocol) write tools — `report_feedback` / `save_to_journ
 
 To develop against a non-production API, pair the runtime override with the matching spec: `SPEC_URL=... pnpm spec:pull && pnpm generate:tools` (see `specgen/README.md`).
 
+## Rate limiting
+
+Per-caller rate limiting is **hosted-only and off by default**. When a deployment opts in, every tool call is counted per credential (a salted hash of the API key, never the key itself) in a fixed 60-second window, backed by Upstash Redis over its REST API. A denied call returns a retryable tool error with a wait hint; a store outage admits the call rather than failing it. Local stdio never rate-limits.
+
+| Variable | Default | Used for |
+| --- | --- | --- |
+| `MCP_RATE_LIMIT_PER_MIN` | unset (off) | The switch and the limit: calls admitted per credential per minute. A set value that is not a positive integer keeps `120`. |
+| `UPSTASH_REDIS_REST_URL` | unset | Upstash REST endpoint. Required alongside the token; the Upstash variables alone never switch limiting on. |
+| `UPSTASH_REDIS_REST_TOKEN` | unset | Upstash REST token. Doubles as the caller-id salt when `MCP_CALLER_SALT` is unset. |
+| `MCP_CALLER_SALT` | per-process random | Salt for the hashed caller id in logs and rate-limit keys. Set it on a rate-limited deployment so rotating the Upstash token does not change every caller id at once. |
+
+Embedders calling `handleMcpRequest` directly can pass a `rateLimiter` option to supply their own limiter, or `noopRateLimiter` to disable it.
+
 ## Serverless endpoint types and autoscaling
 
 `create-endpoint` takes a `body` object matching the REST v2 schema. Set

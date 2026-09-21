@@ -63,5 +63,5 @@ installs can still copy `specgen/skills/` into an agent's skills directory.
   keeps 5-minute budgets); tool descriptions state the real ceiling.
 - One structured log line per tool call (tool, salted caller hash, status,
   latency — never the key or arguments); per-caller rate limiting sits in
-  the same seat (`src/specgen/ops.ts`), enforced through Upstash when the
-  deployment configures it and a no-op otherwise.
+  the same seat (`src/specgen/ops.ts`), enforced through Upstash when
+  `MCP_RATE_LIMIT_PER_MIN` opts in and a no-op otherwise.

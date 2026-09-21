@@ -6,8 +6,9 @@
 //
 // SECURITY: nothing in this file may log the API key, the Authorization
 // header, or tool arguments (which can carry payload secrets). Callers are
-// identified by a short salted hash of the token — stable within one warm
-// instance for correlation, useless for recovering the credential.
+// identified by a short salted hash of the token: stable within one instance
+// by default, and across instances when MCP_CALLER_SALT or the Upstash token
+// supplies the salt; useless for recovering the credential either way.
 
 import { createHash, randomBytes } from 'node:crypto';
 import type { Env } from '../_shared/hosts.js';
@@ -135,13 +136,15 @@ export interface RateLimitOptions {
   now?: () => number;
 }
 
-// Fixed-window counter. The key names the caller and the window, so a new
-// window starts from zero with no reset step and a denied caller learns how
-// much of the window is left. Wall-clock on purpose (credential-check.ts is
-// monotonic): every instance sharing the store must agree where a window
-// starts. Fails OPEN — a store error admits the call and logs one line with
-// the caller hash and tool, never the key or the error text (which can name
-// the store host). A limiter outage must not become a tool outage.
+// Fixed-window counter, per credential: the caller is the hashed API key, so
+// two keys on one Runpod account count separately. The key names the caller
+// and the window, so a new window starts from zero with no reset step and a
+// denied caller learns how much of the window is left. Wall-clock on purpose
+// (credential-check.ts is monotonic): every instance sharing the store must
+// agree where a window starts. Fails OPEN — a store error admits the call and
+// logs one line with the caller hash and tool, never the key or the error
+// text (which can name the store host). A limiter outage must not become a
+// tool outage.
 export function createRateLimiter(
   store: RateLimitStore,
   opts: RateLimitOptions
