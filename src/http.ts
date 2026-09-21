@@ -1,7 +1,7 @@
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createSpecgenServer } from './specgen/server.js';
 import { createToolContext as createSpecgenContext } from './specgen/context.js';
-import { rateLimiterFromEnv } from './specgen/ops.js';
+import { rateLimiterFromEnv, type RateLimiter } from './specgen/ops.js';
 import { SERVER_VERSION } from './server.js';
 import { sanitizeUaToken } from './_shared/tracking.js';
 import {
@@ -317,6 +317,9 @@ export async function handleMcpRequest(
     // Test seams — production uses the shared default checker.
     verifyCredential?: CredentialChecker;
     invalidateCredential?: (token: string) => void;
+    // Per-caller rate limiter. Defaults to rateLimiterFromEnv(); an embedder
+    // passes its own, or noopRateLimiter to disable limiting outright.
+    rateLimiter?: RateLimiter;
   } = {}
 ): Promise<void> {
   const bearerToken = extractBearerToken(req);
@@ -425,10 +428,10 @@ export async function handleMcpRequest(
     }),
     opts.serverVersion ?? SERVER_VERSION,
     {
-      // Per-caller rate limiting, enforced only when the deployment configures
-      // a counter store (UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN);
-      // otherwise the always-admit default. Read per request like the ALP gate.
-      rateLimiter: rateLimiterFromEnv(),
+      // Per-caller rate limiting: the caller's limiter, else the env-selected
+      // one, which is the no-op unless MCP_RATE_LIMIT_PER_MIN opts in. Read
+      // per request like the ALP gate.
+      rateLimiter: opts.rateLimiter ?? rateLimiterFromEnv(),
       // Anonymous usage analytics: hosted-only, no-op unless POSTHOG_API_KEY
       // is set on the deployment, and any client can opt out per request
       // with the X-Runpod-Analytics: off header.

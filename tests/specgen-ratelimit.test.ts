@@ -73,6 +73,21 @@ test('two callers do not share a counter', async () => {
   assert.deepEqual(await limiter('b', 'list-pods'), { allowed: true });
 });
 
+test('the store key is namespaced by caller and window start', async () => {
+  const keys: string[] = [];
+  const limiter = createRateLimiter(
+    {
+      incr: async (key) => {
+        keys.push(key);
+        return 1;
+      },
+    },
+    { limit: 1, windowS: 60, now: () => WINDOW_START_MS + 10_000 }
+  );
+  await limiter('a', 'list-pods');
+  assert.deepEqual(keys, [`runpod-mcp:rl:a:${WINDOW_START_MS / 1000}`]);
+});
+
 test('memory store expires a key after its window', async () => {
   let t = WINDOW_START_MS;
   const store = createMemoryStore(() => t);
@@ -123,14 +138,14 @@ test('upstash store pipelines INCR + EXPIRE NX and returns the count', async () 
       return Response.json([{ result: 7 }, { result: 1 }]);
     }) as typeof fetch,
   });
-  assert.equal(await store.incr('rl:a:100', 60), 7);
+  assert.equal(await store.incr('runpod-mcp:rl:a:100', 60), 7);
   assert.deepEqual(seen, [
     {
       url: 'https://kv.example.invalid/pipeline',
       auth: 'Bearer test-token',
       body: [
-        ['INCR', 'rl:a:100'],
-        ['EXPIRE', 'rl:a:100', 60, 'NX'],
+        ['INCR', 'runpod-mcp:rl:a:100'],
+        ['EXPIRE', 'runpod-mcp:rl:a:100', 60, 'NX'],
       ],
     },
   ]);
@@ -160,21 +175,32 @@ const UPSTASH = {
   UPSTASH_REDIS_REST_TOKEN: 'test-token',
 };
 
-test('rateLimiterFromEnv is the no-op unless both Upstash vars are set', () => {
+test('rateLimiterFromEnv is the no-op unless MCP_RATE_LIMIT_PER_MIN opts in with both Upstash vars', () => {
+  const on = { MCP_RATE_LIMIT_PER_MIN: '120' };
   assert.equal(rateLimiterFromEnv({}), noopRateLimiter);
+  // The Upstash names are what its Vercel integration injects: their
+  // presence alone must not switch limiting on.
+  assert.equal(rateLimiterFromEnv(UPSTASH), noopRateLimiter);
+  assert.equal(
+    rateLimiterFromEnv({ ...UPSTASH, MCP_RATE_LIMIT_PER_MIN: '' }),
+    noopRateLimiter,
+    'empty reads as unset'
+  );
   assert.equal(
     rateLimiterFromEnv({
+      ...on,
       UPSTASH_REDIS_REST_URL: UPSTASH.UPSTASH_REDIS_REST_URL,
     }),
     noopRateLimiter
   );
   assert.equal(
     rateLimiterFromEnv({
+      ...on,
       UPSTASH_REDIS_REST_TOKEN: UPSTASH.UPSTASH_REDIS_REST_TOKEN,
     }),
     noopRateLimiter
   );
-  assert.notEqual(rateLimiterFromEnv(UPSTASH), noopRateLimiter);
+  assert.notEqual(rateLimiterFromEnv({ ...UPSTASH, ...on }), noopRateLimiter);
 });
 
 // Runs an env-selected limiter against a store answering with a fixed count,
@@ -190,9 +216,8 @@ async function admitsAt(limiter: RateLimiter, count: number): Promise<boolean> {
   }
 }
 
-test('RATE_LIMIT_PER_MIN sets the limit; anything but a positive integer keeps 120', async () => {
-  const cases: Array<[string | undefined, number]> = [
-    [undefined, 120],
+test('MCP_RATE_LIMIT_PER_MIN sets the limit; a set value that is not a positive integer keeps 120', async () => {
+  const cases: Array<[string, number]> = [
     ['abc', 120],
     ['0', 120],
     ['-5', 120],
@@ -202,7 +227,7 @@ test('RATE_LIMIT_PER_MIN sets the limit; anything but a positive integer keeps 1
   for (const [value, limit] of cases) {
     const limiter = rateLimiterFromEnv({
       ...UPSTASH,
-      RATE_LIMIT_PER_MIN: value,
+      MCP_RATE_LIMIT_PER_MIN: value,
     });
     assert.equal(
       await admitsAt(limiter, limit),

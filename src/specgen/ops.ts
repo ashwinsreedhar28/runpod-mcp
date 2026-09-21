@@ -46,8 +46,8 @@ export type RateLimiter = (
   toolName: string
 ) => Promise<RateLimitVerdict>;
 
-// Always admits: the default whenever no counter store is configured, so an
-// existing deployment is unchanged until it opts in.
+// Always admits: the default until a deployment opts in (rateLimiterFromEnv),
+// so existing deployments are unchanged.
 export const noopRateLimiter: RateLimiter = async () => ({ allowed: true });
 
 // The one operation a counter backend must provide: bump `key`, set it to
@@ -152,7 +152,10 @@ export function createRateLimiter(
     const windowStart = nowS - (nowS % opts.windowS);
     let count: number;
     try {
-      count = await store.incr(`rl:${caller}:${windowStart}`, opts.windowS);
+      count = await store.incr(
+        `runpod-mcp:rl:${caller}:${windowStart}`,
+        opts.windowS
+      );
     } catch (err) {
       console.error(
         'rate_limit_fail_open',
@@ -171,15 +174,18 @@ export function createRateLimiter(
 
 export const DEFAULT_RATE_LIMIT_PER_MIN = 120;
 
-// Hosted-path selection. Both Upstash variables set → an Upstash-backed
-// limiter at RATE_LIMIT_PER_MIN calls per caller per minute (default 120; a
-// value that is not a positive integer is ignored, so a typo can neither
-// zero nor disable the limit). Anything less → the no-op, exactly as before.
+// Hosted-path selection, an explicit opt-in: MCP_RATE_LIMIT_PER_MIN must be
+// set AND both Upstash variables present, else the no-op. The Upstash names
+// are what Upstash's Vercel integration injects, so their presence alone
+// must not switch limiting on for an embedder already using Upstash. A set
+// value that is not a positive integer keeps the default of 120, so a typo
+// can neither zero nor disable the limit; '' reads as unset, as elsewhere.
 export function rateLimiterFromEnv(env: Env = process.env): RateLimiter {
   const url = env.UPSTASH_REDIS_REST_URL;
   const token = env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return noopRateLimiter;
-  const perMin = Number(env.RATE_LIMIT_PER_MIN);
+  const perMinRaw = env.MCP_RATE_LIMIT_PER_MIN;
+  if (!url || !token || !perMinRaw) return noopRateLimiter;
+  const perMin = Number(perMinRaw);
   const limit =
     Number.isInteger(perMin) && perMin > 0
       ? perMin
