@@ -25,10 +25,10 @@ Per-caller rate limiting is **hosted-only and off by default**. When a deploymen
 | --- | --- | --- |
 | `MCP_RATE_LIMIT_PER_MIN` | unset (off) | The switch and the limit: calls admitted per credential per minute. A set value that is not a positive integer keeps `120`. |
 | `UPSTASH_REDIS_REST_URL` | unset | Upstash REST endpoint. Required alongside the token; the Upstash variables alone never switch limiting on. |
-| `UPSTASH_REDIS_REST_TOKEN` | unset | Upstash REST token. Doubles as the caller-id salt when `MCP_CALLER_SALT` is unset. |
+| `UPSTASH_REDIS_REST_TOKEN` | unset | Upstash REST token. Doubles as the caller-id salt when limiting is on and `MCP_CALLER_SALT` is unset. |
 | `MCP_CALLER_SALT` | per-process random | Salt for the hashed caller id in logs and rate-limit keys. Set it on a rate-limited deployment so rotating the Upstash token does not change every caller id at once. |
 
-Embedders calling `handleMcpRequest` directly can pass a `rateLimiter` option to supply their own limiter, or `noopRateLimiter` to disable it.
+Embedders calling `handleMcpRequest` directly can pass a `rateLimiter` option to supply their own limiter, or `noopRateLimiter` to disable it; both `noopRateLimiter` and the `RateLimiter` type are exported from `@runpod/mcp-server/http`.
 
 ## Serverless endpoint types and autoscaling
 

@@ -16,13 +16,18 @@ import type { Env } from '../_shared/hosts.js';
 // Caller-id salt. Per process by default, so ids correlate within one
 // instance's logs but cannot be joined across instances or replayed against
 // a key list. A shared rate-limit store needs the opposite — every instance
-// must hash a token to the same id — so the store's token doubles as the
-// salt when set (analytics.ts makes the same fallback to the PostHog key).
-// Rotating it then changes every caller id at once; production should set
-// MCP_CALLER_SALT so the salt and the credential rotate independently.
+// must hash a token to the same id — so while limiting is configured (all
+// three variables set) the store's token doubles as the salt, as
+// analytics.ts falls back to the PostHog key. Only then: with the Upstash
+// variables present but limiting off, an embedder's caller ids must not
+// silently become stable across instances — the Upstash variables alone
+// change nothing. Rotating the token changes every caller id at once, so
+// production should set MCP_CALLER_SALT and rotate the two independently.
 const SALT =
   process.env.MCP_CALLER_SALT ||
-  process.env.UPSTASH_REDIS_REST_TOKEN ||
+  (process.env.MCP_RATE_LIMIT_PER_MIN &&
+    process.env.UPSTASH_REDIS_REST_URL &&
+    process.env.UPSTASH_REDIS_REST_TOKEN) ||
   randomBytes(16).toString('hex');
 
 export function callerId(token: string | undefined): string {

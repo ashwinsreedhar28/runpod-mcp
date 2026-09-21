@@ -2,6 +2,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createSpecgenServer } from './specgen/server.js';
 import { createToolContext as createSpecgenContext } from './specgen/context.js';
 import { rateLimiterFromEnv, type RateLimiter } from './specgen/ops.js';
+// For embedders of handleMcpRequest: pass noopRateLimiter to disable limiting.
+export { noopRateLimiter, type RateLimiter } from './specgen/ops.js';
 import { SERVER_VERSION } from './server.js';
 import { sanitizeUaToken } from './_shared/tracking.js';
 import {
