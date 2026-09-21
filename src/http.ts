@@ -425,11 +425,9 @@ export async function handleMcpRequest(
     }),
     opts.serverVersion ?? SERVER_VERSION,
     {
-      // Per-caller rate limiting: enforced only when this deployment
-      // configures a counter store (UPSTASH_REDIS_REST_URL +
-      // UPSTASH_REDIS_REST_TOKEN); otherwise the always-admit default, so an
-      // unconfigured deployment behaves exactly as before. Read per request
-      // like the ALP gate below — no limiter state lives at module scope.
+      // Per-caller rate limiting, enforced only when the deployment configures
+      // a counter store (UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN);
+      // otherwise the always-admit default. Read per request like the ALP gate.
       rateLimiter: rateLimiterFromEnv(),
       // Anonymous usage analytics: hosted-only, no-op unless POSTHOG_API_KEY
       // is set on the deployment, and any client can opt out per request
