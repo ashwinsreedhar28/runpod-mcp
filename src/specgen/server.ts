@@ -210,6 +210,7 @@ export function createSpecgenServer(
 
     // Rate-limit seat: consulted before any tool work. The stub always admits;
     // a denial comes back as a retryable tool error, not a protocol failure.
+    const startedAt = Date.now();
     const verdict = await rateLimiter(caller, request.params.name);
     if (!verdict.allowed) {
       logToolCall({
@@ -217,7 +218,7 @@ export function createSpecgenServer(
         caller,
         ok: false,
         status: 429,
-        durationMs: 0,
+        durationMs: Date.now() - startedAt,
       });
       return {
         content: [
@@ -233,7 +234,6 @@ export function createSpecgenServer(
       };
     }
 
-    const startedAt = Date.now();
     const curated = servedCuratedTools.find(
       (tool) => tool.name === request.params.name
     );
