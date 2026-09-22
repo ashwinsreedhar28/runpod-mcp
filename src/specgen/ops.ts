@@ -13,27 +13,36 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Env } from '../_shared/hosts.js';
 
-// Caller-id salt. Per process by default, so ids correlate within one
+// Caller-id salt, resolved per call as analytics.ts resolves its own, so an
+// embedder that loads its .env after importing this module still gets the
+// configured salt. Per process by default, so ids correlate within one
 // instance's logs but cannot be joined across instances or replayed against
 // a key list. A shared rate-limit store needs the opposite — every instance
 // must hash a token to the same id — so while limiting is configured (all
-// three variables set) the store's token doubles as the salt, as
-// analytics.ts falls back to the PostHog key. Only then: with the Upstash
-// variables present but limiting off, an embedder's caller ids must not
-// silently become stable across instances — the Upstash variables alone
-// change nothing. Rotating the token changes every caller id at once, so
-// production should set MCP_CALLER_SALT and rotate the two independently.
-const SALT =
-  process.env.MCP_CALLER_SALT ||
-  (process.env.MCP_RATE_LIMIT_PER_MIN &&
-    process.env.UPSTASH_REDIS_REST_URL &&
-    process.env.UPSTASH_REDIS_REST_TOKEN) ||
-  randomBytes(16).toString('hex');
+// three variables set) the store's token doubles as the salt. Only then: with
+// the Upstash variables present but limiting off, an embedder's caller ids
+// must not silently become stable across instances. Rotating the token
+// changes every caller id at once, so production should set MCP_CALLER_SALT
+// and rotate the two independently.
+const PROCESS_SALT = randomBytes(16).toString('hex');
 
-export function callerId(token: string | undefined): string {
+function callerSalt(env: Env): string {
+  return (
+    env.MCP_CALLER_SALT ||
+    (env.MCP_RATE_LIMIT_PER_MIN &&
+      env.UPSTASH_REDIS_REST_URL &&
+      env.UPSTASH_REDIS_REST_TOKEN) ||
+    PROCESS_SALT
+  );
+}
+
+export function callerId(
+  token: string | undefined,
+  env: Env = process.env
+): string {
   if (!token) return 'anonymous';
   return createHash('sha256')
-    .update(SALT)
+    .update(callerSalt(env))
     .update(token)
     .digest('hex')
     .slice(0, 12);

@@ -3,9 +3,11 @@
 // fetch, and the env-driven selection. No network, no credentials.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
+  callerId,
   createMemoryStore,
   createRateLimiter,
   createUpstashStore,
@@ -201,6 +203,43 @@ test('rateLimiterFromEnv is the no-op unless MCP_RATE_LIMIT_PER_MIN opts in with
     noopRateLimiter
   );
   assert.notEqual(rateLimiterFromEnv({ ...UPSTASH, ...on }), noopRateLimiter);
+});
+
+// What any instance computes for a token under a given salt — the value a
+// shared counter needs every instance to agree on.
+const idUnder = (salt: string, token: string) =>
+  createHash('sha256').update(salt).update(token).digest('hex').slice(0, 12);
+
+test('callerId resolves its salt per call: cross-instance stable only while limiting is on', () => {
+  const on = { ...UPSTASH, MCP_RATE_LIMIT_PER_MIN: '120' };
+  assert.equal(
+    callerId('rpa_x', on),
+    idUnder(UPSTASH.UPSTASH_REDIS_REST_TOKEN, 'rpa_x'),
+    'limiting on: the Upstash token is the salt, reproducible anywhere'
+  );
+  assert.equal(
+    callerId('rpa_x', { ...on, MCP_CALLER_SALT: 's1' }),
+    idUnder('s1', 'rpa_x'),
+    'an explicit salt wins over the token'
+  );
+  // Upstash vars alone change nothing: the per-process salt stays in force.
+  assert.equal(callerId('rpa_x', UPSTASH), callerId('rpa_x', {}));
+  assert.notEqual(
+    callerId('rpa_x', UPSTASH),
+    idUnder(UPSTASH.UPSTASH_REDIS_REST_TOKEN, 'rpa_x')
+  );
+  assert.equal(callerId(undefined, on), 'anonymous');
+});
+
+test('callerId sees env set after import', () => {
+  const before = callerId('rpa_x');
+  process.env.MCP_CALLER_SALT = 'late';
+  try {
+    assert.equal(callerId('rpa_x'), idUnder('late', 'rpa_x'));
+  } finally {
+    delete process.env.MCP_CALLER_SALT;
+  }
+  assert.equal(callerId('rpa_x'), before);
 });
 
 // Runs an env-selected limiter against a store answering with a fixed count,
