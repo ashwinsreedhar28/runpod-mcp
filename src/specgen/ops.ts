@@ -102,10 +102,10 @@ const UPSTASH_TIMEOUT_MS = 2_000;
 
 // Upstash Redis over its REST API, through the global fetch so no dependency
 // is added. One pipeline per call: INCR, then EXPIRE NX so only the first
-// increment sets the TTL. The pipeline is not atomic and an EXPIRE error is
-// not surfaced, so a key whose EXPIRE fails keeps no TTL; every later call in
-// the window retries it, so a key is orphaned only if every attempt fails —
-// one stale key, never a wrong verdict.
+// increment sets the TTL. The pipeline is not atomic, and an EXPIRE error is
+// logged rather than thrown: the count still stands, so the verdict is right,
+// and every later call in the window retries EXPIRE, so a key is orphaned
+// only if every attempt fails — one stale key at worst.
 // https://upstash.com/docs/redis/features/restapi
 export function createUpstashStore(opts: {
   url: string;
@@ -135,6 +135,12 @@ export function createUpstashStore(opts: {
       const count = results[0]?.result;
       if (typeof count !== 'number') {
         throw new Error(results[0]?.error ?? 'upstash: no count in response');
+      }
+      if (results[1]?.error) {
+        console.error(
+          'rate_limit_expire_failed',
+          JSON.stringify({ windowS, error: 'expire_rejected' })
+        );
       }
       return count;
     },

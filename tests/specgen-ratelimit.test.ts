@@ -153,6 +153,29 @@ test('upstash store pipelines INCR + EXPIRE NX and returns the count', async () 
   ]);
 });
 
+test('upstash store logs a failed EXPIRE without the key or error text and keeps the count', async () => {
+  const store = createUpstashStore({
+    url: 'https://kv.example.invalid',
+    token: 't',
+    fetch: (async () =>
+      Response.json([
+        { result: 3 },
+        { error: 'ERR wrong number of arguments' },
+      ])) as typeof fetch,
+  });
+  const lines: string[] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => void lines.push(args.join(' '));
+  try {
+    assert.equal(await store.incr('runpod-mcp:rl:a:100', 60), 3);
+  } finally {
+    console.error = realError;
+  }
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^rate_limit_expire_failed /);
+  assert.doesNotMatch(lines[0], /runpod-mcp:rl:a:100|ERR wrong/);
+});
+
 test('upstash store rejects on an HTTP error or a failed INCR', async () => {
   const answering = (res: Response) =>
     createUpstashStore({
