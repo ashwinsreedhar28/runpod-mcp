@@ -255,12 +255,14 @@ test('callerId resolves its salt per call: cross-instance stable only while limi
 });
 
 test('callerId sees env set after import', () => {
+  const original = process.env.MCP_CALLER_SALT;
   const before = callerId('rpa_x');
   process.env.MCP_CALLER_SALT = 'late';
   try {
     assert.equal(callerId('rpa_x'), idUnder('late', 'rpa_x'));
   } finally {
-    delete process.env.MCP_CALLER_SALT;
+    if (original === undefined) delete process.env.MCP_CALLER_SALT;
+    else process.env.MCP_CALLER_SALT = original;
   }
   assert.equal(callerId('rpa_x'), before);
 });
